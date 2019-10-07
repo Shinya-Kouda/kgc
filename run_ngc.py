@@ -161,43 +161,25 @@ flags.DEFINE_float(
     "If null_score - best_non_null is greater than the threshold predict null.")
 
 
-class SquadExample(object):#objectクラスを継承
-  """A single training/test example for simple sequence classification.
-
-     For examples without an answer, the start and end position are -1.
-  """
+class KGCExample(object):#objectクラスを継承
+  """A single training/test example for simple sequence classification."""
 
   def __init__(self,
-               qas_id,
-               question_text,
-               doc_tokens,
-               orig_answer_text=None,
-               start_position=None,
-               end_position=None,
-               is_impossible=False):
-    self.qas_id = qas_id
-    self.question_text = question_text
-    self.doc_tokens = doc_tokens
-    self.orig_answer_text = orig_answer_text
-    self.start_position = start_position
-    self.end_position = end_position
-    self.is_impossible = is_impossible
+               kg_id,
+               nlr,
+               kgr):
+    self.kg_id = kg_id
+    self.nlr = nlr
+    self.kgr = kgr
 
   def __str__(self):
     return self.__repr__()
 
   def __repr__(self):
     s = ""
-    s += "qas_id: %s" % (tokenization.printable_text(self.qas_id))
-    s += ", question_text: %s" % (
-        tokenization.printable_text(self.question_text))
-    s += ", doc_tokens: [%s]" % (" ".join(self.doc_tokens))
-    if self.start_position:
-      s += ", start_position: %d" % (self.start_position)
-    if self.start_position:
-      s += ", end_position: %d" % (self.end_position)
-    if self.start_position:
-      s += ", is_impossible: %r" % (self.is_impossible)
+    s += "kg_id: %s" % (tokenization.printable_text(self.kg_id))
+    s += ", nlr: %s" % (tokenization.printable_text(self.nlr))
+    s += ", kgr: %s" % (tokenization.printable_text(self.kgr))
     return s
 
 
@@ -231,8 +213,8 @@ class InputFeatures(object):
     self.is_impossible = is_impossible
 
 
-def read_squad_examples(input_file, is_training):
-  """Read a SQuAD json file into a list of SquadExample."""
+def read_kg_examples(input_file, is_training):
+  """Read a knowledge graph json file into a list of KGCExample."""
   with tf.gfile.Open(input_file, "r") as reader:
     input_data = json.load(reader)["data"]#[Memo]ちょっとわからないけどデータを抽出してる
 
@@ -243,28 +225,28 @@ def read_squad_examples(input_file, is_training):
 
   examples = []
   for entry in input_data:
-    for paragraph in entry["paragraphs"]:
+    for data in entry["data"]:
 
       #文字列を単語の列に変換する
-      paragraph_text = paragraph["context"]
-      doc_tokens = []
+      nlr_text = data["nlr"]
+      kgr = []
       char_to_word_offset = []
       prev_is_whitespace = True
-      for c in paragraph_text:
+      for c in nlr_text:
         if is_whitespace(c):
           prev_is_whitespace = True
         else:
           if prev_is_whitespace:
-            doc_tokens.append(c)
+            kgr.append(c)
           else:
-            doc_tokens[-1] += c
+            kgr[-1] += c
           prev_is_whitespace = False
-        char_to_word_offset.append(len(doc_tokens) - 1)
+        char_to_word_offset.append(len(kgr) - 1)
 
-      #入力データをSquadExampleクラスのインスタンスに変換する
+      #入力データをKGCExampleクラスのインスタンスに変換する
       for qa in paragraph["qas"]:
-        qas_id = qa["id"]
-        question_text = qa["question"]
+        kg_id = qa["id"]
+        nlr = qa["question"]
         start_position = None
         end_position = None
         orig_answer_text = None
@@ -291,7 +273,7 @@ def read_squad_examples(input_file, is_training):
             # Note that this means for training mode, every example is NOT
             # guaranteed to be preserved.
             actual_text = " ".join(
-                doc_tokens[start_position:(end_position + 1)])
+                kgr[start_position:(end_position + 1)])
             cleaned_answer_text = " ".join(
                 tokenization.whitespace_tokenize(orig_answer_text))
             if actual_text.find(cleaned_answer_text) == -1:
@@ -303,11 +285,11 @@ def read_squad_examples(input_file, is_training):
             end_position = -1
             orig_answer_text = ""
 
-        #ここまでで得たデータをSquadExampleクラスのインスタンスに変換する
-        example = SquadExample(
-            qas_id=qas_id,
-            question_text=question_text,
-            doc_tokens=doc_tokens,
+        #ここまでで得たデータをKGCExampleクラスのインスタンスに変換する
+        example = KGCExample(
+            kg_id=kg_id,
+            nlr=nlr,
+            kgr=kgr,
             orig_answer_text=orig_answer_text,
             start_position=start_position,
             end_position=end_position,
@@ -325,9 +307,9 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
 
   unique_id = 1000000000#???
 
-  #exampleはSquadExampleクラスのインスタンスっぽい
+  #exampleはKGCExampleクラスのインスタンスっぽい
   for (example_index, example) in enumerate(examples):
-    query_tokens = tokenizer.tokenize(example.question_text)#tokenizerはtokenization.FullTokenizerやtokenization.BasicTokenizerの返り値
+    query_tokens = tokenizer.tokenize(example.nlr)#tokenizerはtokenization.FullTokenizerやtokenization.BasicTokenizerの返り値
 
     if len(query_tokens) > max_query_length:
       query_tokens = query_tokens[0:max_query_length]
@@ -335,13 +317,13 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
     #何してるのかわからない
     tok_to_orig_index = []
     orig_to_tok_index = []
-    all_doc_tokens = []
-    for (i, token) in enumerate(example.doc_tokens):
-      orig_to_tok_index.append(len(all_doc_tokens))
+    all_kgr = []
+    for (i, token) in enumerate(example.kgr):
+      orig_to_tok_index.append(len(all_kgr))
       sub_tokens = tokenizer.tokenize(token)
       for sub_token in sub_tokens:
         tok_to_orig_index.append(i)
-        all_doc_tokens.append(sub_token)
+        all_kgr.append(sub_token)
 
     #何してるのかわからない
     tok_start_position = None
@@ -351,12 +333,12 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
       tok_end_position = -1
     if is_training and not example.is_impossible:
       tok_start_position = orig_to_tok_index[example.start_position]
-      if example.end_position < len(example.doc_tokens) - 1:
+      if example.end_position < len(example.kgr) - 1:
         tok_end_position = orig_to_tok_index[example.end_position + 1] - 1
       else:
-        tok_end_position = len(all_doc_tokens) - 1
+        tok_end_position = len(all_kgr) - 1
       (tok_start_position, tok_end_position) = _improve_answer_span(
-          all_doc_tokens, tok_start_position, tok_end_position, tokenizer,
+          all_kgr, tok_start_position, tok_end_position, tokenizer,
           example.orig_answer_text)
 
     # The -3 accounts for [CLS], [SEP] and [SEP]
@@ -369,12 +351,12 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
         "DocSpan", ["start", "length"])
     doc_spans = []
     start_offset = 0
-    while start_offset < len(all_doc_tokens):
-      length = len(all_doc_tokens) - start_offset
+    while start_offset < len(all_kgr):
+      length = len(all_kgr) - start_offset
       if length > max_tokens_for_doc:
         length = max_tokens_for_doc
       doc_spans.append(_DocSpan(start=start_offset, length=length))#メインの処理
-      if start_offset + length == len(all_doc_tokens):
+      if start_offset + length == len(all_kgr):
         break
       start_offset += min(length, doc_stride)
 
@@ -399,7 +381,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
         is_max_context = _check_is_max_context(doc_spans, doc_span_index,#このメソッドの定義は下にある。
                                                split_token_index)
         token_is_max_context[len(tokens)] = is_max_context
-        tokens.append(all_doc_tokens[split_token_index])
+        tokens.append(all_kgr[split_token_index])
         segment_ids.append(1)
       tokens.append("[SEP]")
       segment_ids.append(1)
@@ -491,7 +473,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
       unique_id += 1
 
 
-def _improve_answer_span(doc_tokens, input_start, input_end, tokenizer,
+def _improve_answer_span(kgr, input_start, input_end, tokenizer,
                          orig_answer_text):
   """Returns tokenized answer spans that better match the annotated answer."""
 
@@ -521,7 +503,7 @@ def _improve_answer_span(doc_tokens, input_start, input_end, tokenizer,
 
   for new_start in range(input_start, input_end + 1):
     for new_end in range(input_end, new_start - 1, -1):
-      text_span = " ".join(doc_tokens[new_start:(new_end + 1)])
+      text_span = " ".join(kgr[new_start:(new_end + 1)])
       if text_span == tok_answer_text:
         return (new_start, new_end)
 
@@ -858,7 +840,7 @@ def write_predictions(all_examples, all_features, all_results, n_best_size,
         tok_tokens = feature.tokens[pred.start_index:(pred.end_index + 1)]
         orig_doc_start = feature.token_to_orig_map[pred.start_index]
         orig_doc_end = feature.token_to_orig_map[pred.end_index]
-        orig_tokens = example.doc_tokens[orig_doc_start:(orig_doc_end + 1)]
+        orig_tokens = example.kgr[orig_doc_start:(orig_doc_end + 1)]
         tok_text = " ".join(tok_tokens)
 
         # De-tokenize WordPieces that have been split off.
@@ -922,18 +904,18 @@ def write_predictions(all_examples, all_features, all_results, n_best_size,
     assert len(nbest_json) >= 1
 
     if not FLAGS.version_2_with_negative:
-      all_predictions[example.qas_id] = nbest_json[0]["text"]
+      all_predictions[example.kg_id] = nbest_json[0]["text"]
     else:
       # predict "" iff the null score - the score of best non-null > threshold
       score_diff = score_null - best_non_null_entry.start_logit - (
           best_non_null_entry.end_logit)
-      scores_diff_json[example.qas_id] = score_diff
+      scores_diff_json[example.kg_id] = score_diff
       if score_diff > FLAGS.null_score_diff_threshold:
-        all_predictions[example.qas_id] = ""
+        all_predictions[example.kg_id] = ""
       else:
-        all_predictions[example.qas_id] = best_non_null_entry.text
+        all_predictions[example.kg_id] = best_non_null_entry.text
 
-    all_nbest_json[example.qas_id] = nbest_json
+    all_nbest_json[example.kg_id] = nbest_json
 
   with tf.gfile.GFile(output_prediction_file, "w") as writer:
     writer.write(json.dumps(all_predictions, indent=4) + "\n")
@@ -1182,7 +1164,7 @@ def main(_):
 
   #学習するときの事前処理、シャッフルする
   if FLAGS.do_train:
-    train_examples = read_squad_examples(
+    train_examples = read_kg_examples(
         input_file=FLAGS.train_file, is_training=True)
     num_train_steps = int(
         len(train_examples) / FLAGS.train_batch_size * FLAGS.num_train_epochs)
@@ -1251,7 +1233,7 @@ def main(_):
 
   #予測するとき
   if FLAGS.do_predict:
-    eval_examples = read_squad_examples(
+    eval_examples = read_kg_examples(
         input_file=FLAGS.predict_file, is_training=False)
 
     eval_writer = FeatureWriter(
