@@ -617,17 +617,21 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
   def model_fn(features, labels, mode, params):  # pylint: disable=unused-argument
     """The `model_fn` for TPUEstimator."""
 
+    #ログ出力
     tf.logging.info("*** Features ***")
     for name in sorted(features.keys()):
       tf.logging.info("  name = %s, shape = %s" % (name, features[name].shape))
 
+    #featuresからデータ取得
     unique_ids = features["unique_ids"]
     input_ids = features["input_ids"]
     input_mask = features["input_mask"]
     segment_ids = features["segment_ids"]
 
+    #trainかどうか
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
 
+    #モデル作成
     (start_logits, end_logits) = create_model(
         bert_config=bert_config,
         is_training=is_training,
@@ -636,6 +640,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
         segment_ids=segment_ids,
         use_one_hot_embeddings=use_one_hot_embeddings)
 
+    #わからない
     tvars = tf.trainable_variables()
 
     initialized_variable_names = {}
@@ -653,6 +658,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
       else:
         tf.train.init_from_checkpoint(init_checkpoint, assignment_map)
 
+    #ログ出力
     tf.logging.info("**** Trainable Variables ****")
     for var in tvars:
       init_string = ""
@@ -661,6 +667,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
       tf.logging.info("  name = %s, shape = %s%s", var.name, var.shape,
                       init_string)
 
+    #output_specを出力。trainかpredictかで変わる
     output_spec = None
     if mode == tf.estimator.ModeKeys.TRAIN:
       seq_length = modeling.get_shape_list(input_ids)[1]
