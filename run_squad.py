@@ -609,11 +609,13 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
   return (start_logits, end_logits)
 
 
+#引数を与えたらmodel_fnを返す関数
 def model_fn_builder(bert_config, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
                      use_one_hot_embeddings):
   """Returns `model_fn` closure for TPUEstimator."""
 
+  #引数を与えたらoutput_specを返す関数
   def model_fn(features, labels, mode, params):  # pylint: disable=unused-argument
     """The `model_fn` for TPUEstimator."""
 
@@ -643,6 +645,8 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
     #わからない
     tvars = tf.trainable_variables()
 
+    #checkpointの変数を読み込む
+    #tpu使わない場合はここで読み込み、使う場合は読み込む関数を作る
     initialized_variable_names = {}
     scaffold_fn = None
     if init_checkpoint:
@@ -672,6 +676,8 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
     if mode == tf.estimator.ModeKeys.TRAIN:
       seq_length = modeling.get_shape_list(input_ids)[1]
 
+      #lossを計算する関数
+      #positionsは今回はいらないはず
       def compute_loss(logits, positions):
         one_hot_positions = tf.one_hot(
             positions, depth=seq_length, dtype=tf.float32)
@@ -680,17 +686,22 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
             tf.reduce_sum(one_hot_positions * log_probs, axis=-1))
         return loss
 
+      #今回はいらない
       start_positions = features["start_positions"]
       end_positions = features["end_positions"]
 
+      #positionsは入らない
       start_loss = compute_loss(start_logits, start_positions)
       end_loss = compute_loss(end_logits, end_positions)
 
+      #損失関数
       total_loss = (start_loss + end_loss) / 2.0
 
+      #オプティマイザー
       train_op = optimization.create_optimizer(
           total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
 
+      #スペック
       output_spec = tf.contrib.tpu.TPUEstimatorSpec(
           mode=mode,
           loss=total_loss,
@@ -713,6 +724,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
   return model_fn
 
 
+#引数を与えたらinput_fnを返す関数
 def input_fn_builder(input_file, seq_length, is_training, drop_remainder):
   """Creates an `input_fn` closure to be passed to TPUEstimator."""
 
@@ -741,6 +753,7 @@ def input_fn_builder(input_file, seq_length, is_training, drop_remainder):
 
     return example
 
+  #paramsを入れたらデータを返す関数
   def input_fn(params):
     """The actual input function."""
     batch_size = params["batch_size"]
@@ -763,10 +776,12 @@ def input_fn_builder(input_file, seq_length, is_training, drop_remainder):
   return input_fn
 
 
+#何に使うのかまだわからない
 RawResult = collections.namedtuple("RawResult",
                                    ["unique_id", "start_logits", "end_logits"])
 
 
+#最終的な予測結果をjsonに書き出す関数
 def write_predictions(all_examples, all_features, all_results, n_best_size,
                       max_answer_length, do_lower_case, output_prediction_file,
                       output_nbest_file, output_null_log_odds_file):
@@ -953,6 +968,7 @@ def write_predictions(all_examples, all_features, all_results, n_best_size,
       writer.write(json.dumps(scores_diff_json, indent=4) + "\n")
 
 
+#最終的なテキストを返す
 def get_final_text(pred_text, orig_text, do_lower_case):
   """Project the tokenized prediction back to the original text."""
 
