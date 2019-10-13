@@ -293,9 +293,11 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
   for (example_index, example) in enumerate(examples):
     query_tokens = tokenizer.tokenize(example.question_text)#tokenizerはtokenization.FullTokenizerやtokenization.BasicTokenizerの返り値
 
+    #クエリの長さを制限する
     if len(query_tokens) > max_query_length:
       query_tokens = query_tokens[0:max_query_length]
 
+    """
     #何してるのかわからない
     tok_to_orig_index = []
     orig_to_tok_index = []
@@ -322,10 +324,14 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
       (tok_start_position, tok_end_position) = _improve_answer_span(
           all_doc_tokens, tok_start_position, tok_end_position, tokenizer,
           example.orig_answer_text)
+    """
 
     # The -3 accounts for [CLS], [SEP] and [SEP]
     max_tokens_for_doc = max_seq_length - len(query_tokens) - 3
 
+    """
+    #この処理はいらないと思う、なぜなら今は入力文として文の途中までとすると意味ないから
+    #一文をまるっとナレッジグラフ化しないと意味ない
     # We can have documents that are longer than the maximum sequence length.
     # To deal with this we do a sliding window approach, where we take chunks
     # of the up to our max length with a stride of `doc_stride`.
@@ -341,8 +347,10 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
       if start_offset + length == len(all_doc_tokens):
         break
       start_offset += min(length, doc_stride)
+    """
 
     #１ループにつきInputFeaturesクラスのインスタンスを１つ定義する
+    #doc_spansはdoc_tokensでいいと思うけどわからん
     for (doc_span_index, doc_span) in enumerate(doc_spans):
       tokens = []
       token_to_orig_map = {}
@@ -385,6 +393,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
       assert len(input_mask) == max_seq_length
       assert len(segment_ids) == max_seq_length
 
+      """
       start_position = None
       end_position = None
       if is_training and not example.is_impossible:
@@ -407,7 +416,9 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
       if is_training and example.is_impossible:
         start_position = 0
         end_position = 0
+      """
 
+      #ログ出力
       if example_index < 20:
         tf.logging.info("*** Example ***")
         tf.logging.info("unique_id: %s" % (unique_id))
