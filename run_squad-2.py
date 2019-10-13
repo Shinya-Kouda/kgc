@@ -55,12 +55,12 @@ flags.DEFINE_string(
 
 ## Other parameters
 flags.DEFINE_string("train_file", None,
-                    "SQuAD json for training. E.g., train-v1.1.json")
+                    "KG json for training. E.g., train-v1.1.json")
 
 flags.DEFINE_string(
     "predict_file", None,
-    "SQuAD json for predictions. E.g., dev-v1.1.json or test-v1.1.json")
-#[Memo]わからない
+    "KG json for predictions. E.g., dev-v1.1.json or test-v1.1.json")
+
 flags.DEFINE_string(
     "init_checkpoint", None,
     "Initial checkpoint (usually from a pre-trained BERT model).")
@@ -69,18 +69,18 @@ flags.DEFINE_bool(
     "do_lower_case", True,
     "Whether to lower case the input text. Should be True for uncased "
     "models and False for cased models.")
-
+#[todo]数をいい感じに調整する
 flags.DEFINE_integer(
     "max_seq_length", 384,
     "The maximum total input sequence length after WordPiece tokenization. "
     "Sequences longer than this will be truncated, and sequences shorter "
     "than this will be padded.")
-#[Memo]わからない
+#文書を読み込むsliding windowのストライド
 flags.DEFINE_integer(
     "doc_stride", 128,
     "When splitting up a long document into chunks, how much stride to "
     "take between chunks.")
-#[Memo]max_seq_lengthとはちがうらしい
+#max_seq_lengthとはちがう。クエリのほう
 flags.DEFINE_integer(
     "max_query_length", 64,
     "The maximum number of tokens for the question. Questions longer than "
@@ -107,10 +107,10 @@ flags.DEFINE_float(
 
 flags.DEFINE_integer("save_checkpoints_steps", 1000,
                      "How often to save the model checkpoint.")
-#[Memo]これはなんなのかわからない
+#1ステップで呼ばれるestimatorの回数
 flags.DEFINE_integer("iterations_per_loop", 1000,
                      "How many steps to make in each estimator call.")
-#[Memo]これはなんなのかわからない
+#これはなんなのかわからない
 flags.DEFINE_integer(
     "n_best_size", 20,
     "The total number of n-best predictions to generate in the "
@@ -151,37 +151,24 @@ flags.DEFINE_bool(
     "verbose_logging", False,
     "If true, all of the warnings related to data processing will be printed. "
     "A number of warnings are expected for a normal SQuAD evaluation.")
-#[Memo]SQuAD2.0かどうか
-flags.DEFINE_bool(
-    "version_2_with_negative", False,
-    "If true, the SQuAD examples contain some that do not have an answer.")
 
 flags.DEFINE_float(
     "null_score_diff_threshold", 0.0,
     "If null_score - best_non_null is greater than the threshold predict null.")
 
 
-class SquadExample(object):#objectクラスを継承
-  """A single training/test example for simple sequence classification.
-
-     For examples without an answer, the start and end position are -1.
-  """
+class KGExample(object):#objectクラスを継承
 
   def __init__(self,
                qas_id,
                question_text,
                doc_tokens,
-               orig_answer_text=None,
-               start_position=None,
-               end_position=None,
-               is_impossible=False):
+               orig_answer_text=None
+               ):
     self.qas_id = qas_id
     self.question_text = question_text
     self.doc_tokens = doc_tokens
     self.orig_answer_text = orig_answer_text
-    self.start_position = start_position
-    self.end_position = end_position
-    self.is_impossible = is_impossible
 
   def __str__(self):
     return self.__repr__()
@@ -192,12 +179,6 @@ class SquadExample(object):#objectクラスを継承
     s += ", question_text: %s" % (
         tokenization.printable_text(self.question_text))
     s += ", doc_tokens: [%s]" % (" ".join(self.doc_tokens))
-    if self.start_position:
-      s += ", start_position: %d" % (self.start_position)
-    if self.start_position:
-      s += ", end_position: %d" % (self.end_position)
-    if self.start_position:
-      s += ", is_impossible: %r" % (self.is_impossible)
     return s
 
 
@@ -213,10 +194,8 @@ class InputFeatures(object):
                token_is_max_context,
                input_ids,
                input_mask,
-               segment_ids,
-               start_position=None,
-               end_position=None,
-               is_impossible=None):
+               segment_ids
+               ):
     self.unique_id = unique_id
     self.example_index = example_index
     self.doc_span_index = doc_span_index
@@ -226,13 +205,10 @@ class InputFeatures(object):
     self.input_ids = input_ids
     self.input_mask = input_mask
     self.segment_ids = segment_ids
-    self.start_position = start_position
-    self.end_position = end_position
-    self.is_impossible = is_impossible
 
 
-def read_squad_examples(input_file, is_training):
-  """Read a SQuAD json file into a list of SquadExample."""
+def read_kg_examples(input_file, is_training):
+  """Read a KG json file into a list of KGExample."""
   with tf.gfile.Open(input_file, "r") as reader:
     input_data = json.load(reader)["data"]#[Memo]ちょっとわからないけどデータを抽出してる
 
@@ -261,57 +237,45 @@ def read_squad_examples(input_file, is_training):
           prev_is_whitespace = False
         char_to_word_offset.append(len(doc_tokens) - 1)
 
-      #入力データをSquadExampleクラスのインスタンスに変換する
+      #入力データをKGExampleクラスのインスタンスに変換する
       for qa in paragraph["qas"]:
         qas_id = qa["id"]
         question_text = qa["question"]
-        start_position = None
-        end_position = None
         orig_answer_text = None
-        is_impossible = False
         if is_training:
 
-          if FLAGS.version_2_with_negative:#SQuAD 2.0でないかどうか
-            is_impossible = qa["is_impossible"]#SQuAD 1.1のときはimpossibleなときがある。たぶんそれはQに対するAがないときとかかな
-          if (len(qa["answers"]) != 1) and (not is_impossible):
+          #[todo]もしanswersにあたるものがなかったらエラー
+          if (len(qa["answers"]) != 1):
             raise ValueError(
                 "For training, each question should have exactly 1 answer.")
-          if not is_impossible:
-            answer = qa["answers"][0]
-            orig_answer_text = answer["text"]
-            answer_offset = answer["answer_start"]
-            answer_length = len(orig_answer_text)
-            start_position = char_to_word_offset[answer_offset]
-            end_position = char_to_word_offset[answer_offset + answer_length -
-                                               1]
-            # Only add answers where the text can be exactly recovered from the
-            # document. If this CAN'T happen it's likely due to weird Unicode
-            # stuff so we will just skip the example.
-            #
-            # Note that this means for training mode, every example is NOT
-            # guaranteed to be preserved.
-            actual_text = " ".join(
-                doc_tokens[start_position:(end_position + 1)])
-            cleaned_answer_text = " ".join(
-                tokenization.whitespace_tokenize(orig_answer_text))
-            if actual_text.find(cleaned_answer_text) == -1:
-              tf.logging.warning("Could not find answer: '%s' vs. '%s'",
-                                 actual_text, cleaned_answer_text)
-              continue
-          else:
-            start_position = -1
-            end_position = -1
-            orig_answer_text = ""
 
-        #ここまでで得たデータをSquadExampleクラスのインスタンスに変換する
-        example = SquadExample(
+          answer = qa["answers"][0]
+          orig_answer_text = answer["text"]
+          answer_offset = answer["answer_start"]
+          answer_length = len(orig_answer_text)
+          # Only add answers where the text can be exactly recovered from the
+          # document. If this CAN'T happen it's likely due to weird Unicode
+          # stuff so we will just skip the example.
+          #
+          # Note that this means for training mode, every example is NOT
+          # guaranteed to be preserved.
+          #[todo]もしanswersにあたるものが、clean後になかったらwarning
+          actual_text = " ".join(
+              doc_tokens[start_position:(end_position + 1)])
+          cleaned_answer_text = " ".join(
+              tokenization.whitespace_tokenize(orig_answer_text))
+          if actual_text.find(cleaned_answer_text) == -1:
+            tf.logging.warning("Could not find answer: '%s' vs. '%s'",
+                                actual_text, cleaned_answer_text)
+            continue
+
+        #ここまでで得たデータをKGExampleクラスのインスタンスに変換する
+        example = KGExample(
             qas_id=qas_id,
             question_text=question_text,
             doc_tokens=doc_tokens,
-            orig_answer_text=orig_answer_text,
-            start_position=start_position,
-            end_position=end_position,
-            is_impossible=is_impossible)
+            orig_answer_text=orig_answer_text
+            )
         examples.append(example)
 
   return examples
@@ -325,7 +289,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
 
   unique_id = 1000000000#???
 
-  #exampleはSquadExampleクラスのインスタンスっぽい
+  #exampleはKGExampleクラスのインスタンス
   for (example_index, example) in enumerate(examples):
     query_tokens = tokenizer.tokenize(example.question_text)#tokenizerはtokenization.FullTokenizerやtokenization.BasicTokenizerの返り値
 
