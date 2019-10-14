@@ -160,25 +160,30 @@ flags.DEFINE_float(
 class KGExample(object):#objectクラスを継承
 
   def __init__(self,
-               qas_id,
-               question_text,
-               doc_tokens,
-               orig_answer_text=None
+               id,
+               nlr_text,
+               nlr_tokens,
+               kgr_text,
+               kgr_tokens
                ):
-    self.qas_id = qas_id
-    self.question_text = question_text
-    self.doc_tokens = doc_tokens
-    self.orig_answer_text = orig_answer_text
+    self.id = id
+    self.nlr_text = nlr_text
+    self.nlr_tokens = nlr_tokens
+    self.kgr_text
+    self.kgr_tokens
 
   def __str__(self):
     return self.__repr__()
 
   def __repr__(self):
     s = ""
-    s += "qas_id: %s" % (tokenization.printable_text(self.qas_id))
-    s += ", question_text: %s" % (
-        tokenization.printable_text(self.question_text))
-    s += ", doc_tokens: [%s]" % (" ".join(self.doc_tokens))
+    s += "id: %s" % (tokenization.printable_text(self.id))
+    s += ", nlr_text: %s" % (
+        tokenization.printable_text(self.nlr_text))
+    s += ", nlr_tokens: [%s]" % (" ".join(self.nlr_tokens))
+    s += ", kgr_text: %s" % (
+        tokenization.printable_text(self.kgr_text))
+    s += ", kgr_tokens: [%s]" % (" ".join(self.kgr_tokens))
     return s
 
 
@@ -219,55 +224,34 @@ def read_kg_examples(input_file, is_training):
 
   examples = []
   for entry in input_data:
-    for paragraph in entry["paragraphs"]:
+    for data in entry["data"]:
 
       #文字列を単語の列に変換する
-      paragraph_text = paragraph["context"]
-      doc_tokens = []
+      data_text = data["nlr"]
+      nlr_tokens = []
       char_to_word_offset = []
       prev_is_whitespace = True
-      for c in paragraph_text:
+      for c in data_text:
         if is_whitespace(c):
           prev_is_whitespace = True
         else:
           if prev_is_whitespace:
-            doc_tokens.append(c)
+            nlr_tokens.append(c)
           else:
-            doc_tokens[-1] += c
+            nlr_tokens[-1] += c
           prev_is_whitespace = False
-        char_to_word_offset.append(len(doc_tokens) - 1)
+        char_to_word_offset.append(len(nlr_tokens) - 1)
 
       #入力データをKGExampleクラスのインスタンスに変換する
-      for qa in paragraph["qas"]:
-        qas_id = qa["id"]
-        question_text = qa["question"]
-        orig_answer_text = None
+      for kgr_text in data["kgr"]:
+        kgr_id = k["id"]
+        kgr_text = None
         if is_training:
 
-          #[todo]もしanswersにあたるものがなかったらエラー
-          if (len(qa["answers"]) != 1):
+          #[todo]もしkgrにあたるものがなかったらエラー
+          if (len(data["kgr"]) != 1):
             raise ValueError(
-                "For training, each question should have exactly 1 answer.")
-
-          answer = qa["answers"][0]
-          orig_answer_text = answer["text"]
-          answer_offset = answer["answer_start"]
-          answer_length = len(orig_answer_text)
-          # Only add answers where the text can be exactly recovered from the
-          # document. If this CAN'T happen it's likely due to weird Unicode
-          # stuff so we will just skip the example.
-          #
-          # Note that this means for training mode, every example is NOT
-          # guaranteed to be preserved.
-          #[todo]もしanswersにあたるものが、clean後になかったらwarning
-          actual_text = " ".join(
-              doc_tokens[start_position:(end_position + 1)])
-          cleaned_answer_text = " ".join(
-              tokenization.whitespace_tokenize(orig_answer_text))
-          if actual_text.find(cleaned_answer_text) == -1:
-            tf.logging.warning("Could not find answer: '%s' vs. '%s'",
-                                actual_text, cleaned_answer_text)
-            continue
+                "knowledge graph representation is =0 or <=2.")
 
         #ここまでで得たデータをKGExampleクラスのインスタンスに変換する
         example = KGExample(
@@ -455,17 +439,15 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
           token_is_max_context=token_is_max_context,
           input_ids=input_ids,
           input_mask=input_mask,
-          segment_ids=segment_ids,
-          start_position=start_position,
-          end_position=end_position,
-          is_impossible=example.is_impossible)
+          segment_ids=segment_ids
+          )
 
       # Run callback
       output_fn(feature)
 
       unique_id += 1
 
-
+"""
 def _improve_answer_span(doc_tokens, input_start, input_end, tokenizer,
                          orig_answer_text):
   """Returns tokenized answer spans that better match the annotated answer."""
@@ -501,8 +483,10 @@ def _improve_answer_span(doc_tokens, input_start, input_end, tokenizer,
         return (new_start, new_end)
 
   return (input_start, input_end)
+"""
 
 
+"""
 def _check_is_max_context(doc_spans, cur_span_index, position):
   """Check if this is the 'max context' doc span for the token."""
 
@@ -538,6 +522,7 @@ def _check_is_max_context(doc_spans, cur_span_index, position):
       best_span_index = span_index
 
   return cur_span_index == best_span_index
+"""
 
 
 def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
