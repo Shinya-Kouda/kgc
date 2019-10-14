@@ -1,0 +1,8 @@
+{
+    "data": [
+        {
+            "nlr": ":SUBJECT :BEVERB :COMPLEMENT",
+            "ngr": "Scene Situation Subject :SUBJECT hasPredicate equalTo what :COMPLEMENT"
+        }
+    ]
+}

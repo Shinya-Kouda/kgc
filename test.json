@@ -1,19 +1,19 @@
 {
     "data": [
         {
-            "kg_id": 000000001,
+            "id": 1,
             "nlr": "Andrew is happy",
-            "kgr": "Scene Situation Subject Andrew hasPredicate equalTo what happy"
+            "kgr": "[Scene] [Situation] [Subject] Andrew [hasPredicate] [equalTo] [what] happy"
         },
         {
-            "kg_id": 000000002,
+            "id": 2,
             "nlr": "They are strong",
-            "kgr": "Scene Situation Subject They hasPredicate equalTo what strong"
+            "kgr": "[Scene] [Situation] [Subject] They [hasPredicate] [equalTo] [what] strong"
         },
         {
-            "kg_id": 000000003,
+            "id": 3,
             "nlr": "It is it",
-            "kgr": "Scene Situation Subject It hasPredicate equalTo what it"
+            "kgr": "[Scene] [Situation] [Subject] It [hasPredicate] [equalTo] [what] it"
         }
     ]
 }
