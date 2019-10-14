@@ -170,7 +170,7 @@ class KGExample(object):#objectクラスを継承
     self.nlr_text = nlr_text
     self.nlr_tokens = nlr_tokens
     self.kgr_text
-    self.kgr_tokens
+    self.kgr_tokens#いらない？
 
   def __str__(self):
     return self.__repr__()
@@ -227,11 +227,11 @@ def read_kg_examples(input_file, is_training):
     for data in entry["data"]:
 
       #文字列を単語の列に変換する
-      data_text = data["nlr"]
+      nlr_text = data["nlr"]
       nlr_tokens = []
       char_to_word_offset = []
       prev_is_whitespace = True
-      for c in data_text:
+      for c in nlr_text:
         if is_whitespace(c):
           prev_is_whitespace = True
         else:
@@ -242,44 +242,65 @@ def read_kg_examples(input_file, is_training):
           prev_is_whitespace = False
         char_to_word_offset.append(len(nlr_tokens) - 1)
 
-      #入力データをKGExampleクラスのインスタンスに変換する
-      for kgr_text in data["kgr"]:
-        kgr_id = k["id"]
-        kgr_text = None
-        if is_training:
+      #kgrの方も同様の処理
+      id=data["id"]
+      kgr_text = data["kgr"]
+      kgr_tokens = []
+      char_to_word_offset = []
+      prev_is_whitespace = True
+      for c in kgr_text:
+        if is_whitespace(c):
+          prev_is_whitespace = True
+        else:
+          if prev_is_whitespace:
+            kgr_tokens.append(c)
+          else:
+            kgr_tokens[-1] += c
+          prev_is_whitespace = False
+        char_to_word_offset.append(len(kgr_tokens) - 1)
+      
+      if is_training:
+        #もしkgrにあたるものがなかったらエラー
+        if (len(data["kgr"]) != 1):
+          raise ValueError(
+              "knowledge graph representation is =0 or <=2.")
 
-          #[todo]もしkgrにあたるものがなかったらエラー
-          if (len(data["kgr"]) != 1):
-            raise ValueError(
-                "knowledge graph representation is =0 or <=2.")
-
-        #ここまでで得たデータをKGExampleクラスのインスタンスに変換する
-        example = KGExample(
-            qas_id=qas_id,
-            question_text=question_text,
-            doc_tokens=doc_tokens,
-            orig_answer_text=orig_answer_text
-            )
-        examples.append(example)
+      #ここまでで得たデータをKGExampleクラスのインスタンスに変換する
+      example = KGExample(
+          id=id,
+          nlr_text=nlr_text,
+          nlr_tokens=nlr_tokens,
+          kgr_text=kgr_text,
+          kgr_tokens=kgr_tokens#いらない？
+          )
+      examples.append(example)
 
   return examples
 
 
 
-def convert_examples_to_features(examples, tokenizer, max_seq_length,
-                                 doc_stride, max_query_length, is_training,
-                                 output_fn):
+def convert_examples_to_features(examples,
+                                 tokenizer,
+                                 max_nlr_length,
+                                 doc_stride,#多分いらない
+                                 max_kgr_length,
+                                 is_training,
+                                 output_fn
+                                 ):
   """Loads a data file into a list of `InputBatch`s."""
 
   unique_id = 1000000000#???
 
   #exampleはKGExampleクラスのインスタンス
   for (example_index, example) in enumerate(examples):
-    query_tokens = tokenizer.tokenize(example.question_text)#tokenizerはtokenization.FullTokenizerやtokenization.BasicTokenizerの返り値
+    #tokenizerはtokenization.FullTokenizerやtokenization.BasicTokenizerの返り値
+    #tokenizerは使わずexample.kgr_tokensでいいと思う
+    #kgr_tokens = tokenizer.tokenize(example.kgr_text)
+    kgr_tokens = example.kgr_tokens
 
-    #クエリの長さを制限する
-    if len(query_tokens) > max_query_length:
-      query_tokens = query_tokens[0:max_query_length]
+    #ナレッジグラフ表現の長さを制限する
+    if len(kgr_tokens) > max_kgr_length:
+      kgr_tokens = kgr_tokens[0:max_kgr_length]
 
     """
     #何してるのかわからない
@@ -311,7 +332,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
     """
 
     # The -3 accounts for [CLS], [SEP] and [SEP]
-    max_tokens_for_doc = max_seq_length - len(query_tokens) - 3
+    max_tokens_for_nlr = max_nlr_length - len(kgr_tokens) - 3
 
     """
     #この処理はいらないと思う、なぜなら今は入力文として文の途中までとすると意味ないから
@@ -342,7 +363,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
       segment_ids = []
       tokens.append("[CLS]")
       segment_ids.append(0)
-      for token in query_tokens:
+      for token in kgr_tokens:
         tokens.append(token)
         segment_ids.append(0)
       tokens.append("[SEP]")
