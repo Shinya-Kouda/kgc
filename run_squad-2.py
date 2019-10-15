@@ -547,6 +547,8 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
       seq_length = modeling.get_shape_list(input_ids)[1]
 
       #lossを計算する関数
+      #スペシャルトークンが過不足ないほど良いスコア
+      #語句の意味が近いほど良いスコア
       #positionsは今回はいらないはず
       def compute_loss(logits, positions):
         one_hot_positions = tf.one_hot(
