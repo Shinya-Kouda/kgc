@@ -564,7 +564,23 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
 
       #lossを計算する関数
       #かなり作りこみが必要。たぶん自分で考える必要がある
-      def compute_loss(logits, positions):
+      def compute_loss(predict, real):
+        #リストを整理
+        #スペシャルトークンのアルファベット順にする
+
+        #special tokens loss
+        #スペシャルトークンが同じものが存在し、その個数が同じなら、それらのトークンによる損失は０
+        #そうでないなら損失１として、加算する
+        def special_tokens_loss(predict, real):
+          counter = 0
+          for p in predict:
+            for r in real:
+              if p = r:
+                counter += 1
+              else:
+
+          return counter
+        #other tokens loss
         one_hot_positions = tf.one_hot(
             positions, depth=seq_length, dtype=tf.float32)
         log_probs = tf.nn.log_softmax(logits, axis=-1)
