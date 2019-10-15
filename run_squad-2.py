@@ -357,7 +357,7 @@ def convert_examples_to_features(examples,
 
     unique_id += 1
 
-
+#いらない
 def _improve_answer_span(doc_tokens, input_start, input_end, tokenizer,
                          orig_answer_text):
   """Returns tokenized answer spans that better match the annotated answer."""
@@ -396,7 +396,7 @@ def _improve_answer_span(doc_tokens, input_start, input_end, tokenizer,
 
 
 
-
+#いらない
 def _check_is_max_context(doc_spans, cur_span_index, position):
   """Check if this is the 'max context' doc span for the token."""
 
@@ -434,7 +434,7 @@ def _check_is_max_context(doc_spans, cur_span_index, position):
   return cur_span_index == best_span_index
 
 
-
+#ここはTransformerにする
 def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
                  use_one_hot_embeddings):
   """Creates a classification model."""
@@ -453,6 +453,11 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
   seq_length = final_hidden_shape[1]
   hidden_size = final_hidden_shape[2]
 
+  final_hidden_matrix = tf.reshape(final_hidden,
+                                   [batch_size * seq_length, hidden_size])
+
+  #ここをTransformerにする
+  """
   output_weights = tf.get_variable(
       #/はスコープの区切りを表す。だからcls/squad/output_weightsはclsスコープのsquadスコープのoutput_weightsという変数を表す
       #変数がないときは定義し、ある時はそれを呼び出す
@@ -464,8 +469,6 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
       #変数がないときは定義し、ある時はそれを呼び出す
       "cls/squad/output_bias", [2], initializer=tf.zeros_initializer())
 
-  final_hidden_matrix = tf.reshape(final_hidden,
-                                   [batch_size * seq_length, hidden_size])
   logits = tf.matmul(final_hidden_matrix, output_weights, transpose_b=True)
   logits = tf.nn.bias_add(logits, output_bias)
 
@@ -477,6 +480,19 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
   (start_logits, end_logits) = (unstacked_logits[0], unstacked_logits[1])
 
   return (start_logits, end_logits)
+  """
+  final_outputs = modeling.transformer_model(input_tensor=final_hidden_matrix,
+                              attention_mask=None,
+                              hidden_size=768,
+                              num_hidden_layers=12,
+                              num_attention_heads=12,
+                              intermediate_size=3072,
+                              intermediate_act_fn=modeling.gelu,
+                              hidden_dropout_prob=0.1,
+                              attention_probs_dropout_prob=0.1,
+                              initializer_range=0.02,
+                              do_return_all_layers=False)
+  return final_outputs
 
 
 #引数を与えたらmodel_fnを返す関数
@@ -504,7 +520,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
 
     #モデル作成
-    (start_logits, end_logits) = create_model(
+    transformer_outputs = create_model(
         bert_config=bert_config,
         is_training=is_training,
         input_ids=input_ids,
@@ -547,9 +563,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
       seq_length = modeling.get_shape_list(input_ids)[1]
 
       #lossを計算する関数
-      #スペシャルトークンが過不足ないほど良いスコア
-      #語句の意味が近いほど良いスコア
-      #positionsは今回はいらないはず
+      #かなり作りこみが必要。たぶん自分で考える必要がある
       def compute_loss(logits, positions):
         one_hot_positions = tf.one_hot(
             positions, depth=seq_length, dtype=tf.float32)
