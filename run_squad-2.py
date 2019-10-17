@@ -491,7 +491,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
                               hidden_dropout_prob=0.1,
                               attention_probs_dropout_prob=0.1,
                               initializer_range=0.02,
-                              do_return_all_layers=False)
+                              do_return_all_layers=False)#現状Falseのみ
   return final_outputs
 
 
@@ -564,27 +564,79 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
 
       #lossを計算する関数
       #かなり作りこみが必要。たぶん自分で考える必要がある
-      def compute_loss(predict, real):
+      def compute_loss(predict, real, predict_tensor, real_tensor):
         #リストを整理
         #スペシャルトークンのアルファベット順にする
+        #このとき、テンソルの方も対応する部分の順番を変える
+        def sort_tokens_tensor(tokens, tensor):#[TODO]まだtensorを反映していない
+          for i in range(len(tokens)):
+            p_start = i
+            if tokens[i][0] == '[' and tokens[i][-1] == ']':
+              for j in range(i+1,len(tokens)):
+                if tokens[j][0] == '[' and tokens[j][-1] == ']':
+                  p_end = j
+                  next_special_token_start = j
+                  next_special_token = tokens[j]
+                  if next_special_token.lower() < tokens[i].lower():
+                    for k in range(j+1,len(tokens)):
+                      if tokens[k][0] == '[' and tokens[k][-1] == ']':
+                        next_special_token_end = k
+                        break
+                      else:
+                        next_special_token_end = len(tokens)
+                    if p_start == 0:
+                      tmp1 = []
+                    else:
+                      tmp1 = tokens[:p_start]
+                    tmp2 = tokens[p_start:p_end]
+                    tmp3 = tokens[next_special_token_start:next_special_token_end]
+                    if next_special_token_end == len(tokens):
+                      tmp4 = []
+                    else:
+                      tmp4 = tokens[next_special_token_end:]
+                    tokens = tmp1 + tmp3 + tmp2 + tmp4
+                  break
 
         #スペシャルトークンかどうか判断する関数
         #トークンの先頭と最後が[]ならtrue
-
+        def is_special_token(token):
+          if token[0] == '[' and token[-1] == ']':
+            return True
+          else:
+            return False
         #special tokens loss
         #predictのスペシャルトークンAがrealにもある場合、そのトークンによる損失は０、ない場合は１
         #スペシャルトークンAが複数存在する場合、その個数が同じなら、それらのトークンによる損失は０、同じでないときはその個数
         #これをすべてのトークンに渡り加算する
         def special_tokens_loss(predict, real):
-          counter = 0
-          for p in predict:
-            for r in real:
-              if p = r:
-                counter += 1
-              else:
-
+          p_specials = {p for p in predict if is_special_token(p)}
+          r_specials = {r for r in real if is_special_token(r)}
+          counter = len(p_specials ^ r_specials)
           return counter
         #other tokens loss
+        #等しいスペシャルトークンの後ろのトークン同士の差をロスとする
+        #１つのトークンはベクトルで表されるので、ベクトルの間の角でロスを定義する
+        #角が０の時ロスも０
+        #角が９０度のときロスは１
+        #角が１８０度の時ロスは２になるようにする
+        #等しいトークンが複数あるときは、それらの間でロスが最も低い組み合わせを選ぶ
+        #等しいトークンがないときは、ロスには加算されない（special_tokens_lossで加算済）
+        #等しいトークンがありかつ数が異なるときは、ロスが小さいペアを優先的に結び、ロスが大きいペアは
+        #special_tokens_lossで加算される
+        def other_tokens_loss(predict, real, predict_tensor, real_tensor):
+          #predictのスペシャルトークン１つに着目しインデックスを取得
+
+          #そのトークンと同じトークンがあれば、インデックス（複数もありうる）を取得
+          #realからも探索
+
+          #ロスが最小になる組み合わせを探索
+
+          #ペアができたものはロスに加算して除去
+          #ペアができなかったものはspecial_tokens_lossで加算されているので除くだけ
+
+
+
+
         one_hot_positions = tf.one_hot(
             positions, depth=seq_length, dtype=tf.float32)
         log_probs = tf.nn.log_softmax(logits, axis=-1)
