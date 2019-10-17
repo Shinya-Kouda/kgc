@@ -1,4 +1,4 @@
-predict = ['[CLS]','[Subject]','X','and','Y','[eq]','genius','[END]']
+predict = ['[Subject]','X','and','Y','[eq]','genius','[asd]','asd','fgh']
 predict_sorted = predict
 for i in range(len(predict)):
     p_start = i
