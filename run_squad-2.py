@@ -567,10 +567,36 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
       def compute_loss(predict, real):
         #リストを整理
         #スペシャルトークンのアルファベット順にする
+        predict_sorted = predict
+        for i,p in enumerate(predict):
+          p_start = i
+          for j in range(i+1,len(predict)):
+            if predict[j][0] = '[' and predict[j][-1] = ']':
+              p_end = j - 1
+              next_special_token_start = j
+              next_special_token = predict[j]
+              if next_special_token < p:
+                for k in range(j+1,len(predict)):
+                  if predict[k][0] = '[' and predict[k][-1] = ']':
+                    next_special_token_end = k - 1
+                    break
+              break
+          if p_start = 0:
+            tmp1 = []
+          else:
+            tmp1 = predict_sorted[:(p_start - 1)]
+          tmp2 = predict_sorted[:p_end][p_start:]
+          tmp3 = predict_sorted[next_special_token_start:][:next_special_token_end]
+          if next_special_token_end = len(predict):
+            tmp4 = []
+          else:
+            tmp4 = predict_sorted[(next_special_token_end + 1):]
+          predict_sorted = tmp1 + tmp2 + tmp3 + tmp4
 
         #special tokens loss
-        #スペシャルトークンが同じものが存在し、その個数が同じなら、それらのトークンによる損失は０
-        #そうでないなら損失１として、加算する
+        #predictのスペシャルトークンAがrealにもある場合、そのトークンによる損失は０、ない場合は１
+        #スペシャルトークンAが複数存在する場合、その個数が同じなら、それらのトークンによる損失は０、同じでないときはその個数
+        #これをすべてのトークンに渡り加算する
         def special_tokens_loss(predict, real):
           counter = 0
           for p in predict:
