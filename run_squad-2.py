@@ -567,6 +567,9 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
       def compute_loss(predict, real):
         #リストを整理
         #スペシャルトークンのアルファベット順にする
+        
+        #スペシャルトークンかどうか判断する関数
+        #トークンの先頭と最後が[]ならtrue
 
         #special tokens loss
         #スペシャルトークンが同じものが存在し、その個数が同じなら、それらのトークンによる損失は０
