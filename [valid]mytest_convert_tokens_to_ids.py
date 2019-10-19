@@ -55,10 +55,16 @@ model = modeling.BertModel(
       use_one_hot_embeddings=True)
 
 final_hidden = model.get_sequence_output()
+eout = model.get_embedding_output()
+pout = model.get_pooled_output()
+etab = model.get_embedding_table()
+
 
 init = tf.initialize_all_variables()
 
 with tf.Session() as sess:
     sess.run(init)
-    result = sess.run(final_hidden)
-    print(result)
+    #[動く]result = sess.run(final_hidden)
+    #[動く]print(result)
+    result2 = sess.run(etab)
+    print(result2)
