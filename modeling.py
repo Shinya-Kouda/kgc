@@ -225,7 +225,7 @@ class BertModel(object):
         # We "pool" the model by simply taking the hidden state corresponding
         # to the first token. We assume that this has been pre-trained
         first_token_tensor = tf.squeeze(self.sequence_output[:, 0:1, :], axis=1)
-        self.pooled_output = tf.layers.dense(
+        self.pooled_output = tf.layers.dense(#第二引数は整数で出力する次元を表す
             first_token_tensor,
             config.hidden_size,
             activation=tf.tanh,
@@ -372,7 +372,7 @@ def layer_norm_and_dropout(input_tensor, dropout_prob, name=None):
   return output_tensor
 
 
-def create_initializer(initializer_range=0.02):
+def create_initializer(initializer_range=0.02):#わざわざ関数化する意味がわからん。デフォルト値を設定したかった？
   """Creates a `truncated_normal_initializer` with the given range."""
   return tf.truncated_normal_initializer(stddev=initializer_range)
 
@@ -554,7 +554,7 @@ def create_attention_mask_from_input_mask(from_tensor, to_mask):
 
   return mask
 
-
+#multi-headed attention
 def attention_layer(from_tensor,
                     to_tensor,
                     attention_mask=None,
@@ -663,7 +663,7 @@ def attention_layer(from_tensor,
   to_tensor_2d = reshape_to_matrix(to_tensor)
 
   # `query_layer` = [B*F, N*H]
-  query_layer = tf.layers.dense(
+  query_layer = tf.layers.dense(#第二引数は整数で出力する次元を表す
       from_tensor_2d,
       num_attention_heads * size_per_head,
       activation=query_act,
@@ -671,7 +671,7 @@ def attention_layer(from_tensor,
       kernel_initializer=create_initializer(initializer_range))
 
   # `key_layer` = [B*T, N*H]
-  key_layer = tf.layers.dense(
+  key_layer = tf.layers.dense(#第二引数は整数で出力する次元を表す
       to_tensor_2d,
       num_attention_heads * size_per_head,
       activation=key_act,
@@ -679,7 +679,7 @@ def attention_layer(from_tensor,
       kernel_initializer=create_initializer(initializer_range))
 
   # `value_layer` = [B*T, N*H]
-  value_layer = tf.layers.dense(
+  value_layer = tf.layers.dense(#第二引数は整数で出力する次元を表す
       to_tensor_2d,
       num_attention_heads * size_per_head,
       activation=value_act,
@@ -799,11 +799,13 @@ def transformer_model(input_tensor,
   Raises:
     ValueError: A Tensor shape or parameter is invalid.
   """
+  #hidden_sizeがnum_attention_headsの倍数でなかったらエラー出力
   if hidden_size % num_attention_heads != 0:
     raise ValueError(
         "The hidden size (%d) is not a multiple of the number of attention "
         "heads (%d)" % (hidden_size, num_attention_heads))
 
+  #様々なサイズを取得
   attention_head_size = int(hidden_size / num_attention_heads)
   input_shape = get_shape_list(input_tensor, expected_rank=3)
   batch_size = input_shape[0]
@@ -816,20 +818,22 @@ def transformer_model(input_tensor,
     raise ValueError("The width of the input tensor (%d) != hidden size (%d)" %
                      (input_width, hidden_size))
 
-  # We keep the representation as a 2D tensor to avoid re-shaping it back and
-  # forth from a 3D tensor to a 2D tensor. Re-shapes are normally free on
-  # the GPU/CPU but may not be free on the TPU, so we want to minimize them to
-  # help the optimizer.
+  # 表現を2Dテンソルとして保持し、3Dテンソルから2Dテンソルへと前後に再形成されるのを防ぎます。 
+  # リシェイプは通常GPU / CPUでは無料ですが、TPUでは無料ではない可能性があるため、
+  # オプティマイザを支援するためにそれらを最小化する必要があります。
   prev_output = reshape_to_matrix(input_tensor)
 
+  #Trasformerのメイン処理
   all_layer_outputs = []
+  #隠れ層の数だけループ
   for layer_idx in range(num_hidden_layers):
     with tf.variable_scope("layer_%d" % layer_idx):
-      layer_input = prev_output
+      layer_input = prev_output#前層の出力を今の層の入力とする
 
       with tf.variable_scope("attention"):
         attention_heads = []
         with tf.variable_scope("self"):
+          #multi-headed attention
           attention_head = attention_layer(
               from_tensor=layer_input,
               to_tensor=layer_input,
@@ -842,7 +846,7 @@ def transformer_model(input_tensor,
               batch_size=batch_size,
               from_seq_length=seq_length,
               to_seq_length=seq_length)
-          attention_heads.append(attention_head)
+          attention_heads.append(attention_head)#multi-headed attentionを１つappend
 
         attention_output = None
         if len(attention_heads) == 1:
@@ -850,12 +854,15 @@ def transformer_model(input_tensor,
         else:
           # In the case where we have other sequences, we just concatenate
           # them to the self-attention head before the projection.
+          #In the case where we have other sequencesってどういうこと？
+          #if文的にheadが複数あるときってことじゃないの？
           attention_output = tf.concat(attention_heads, axis=-1)
 
         # Run a linear projection of `hidden_size` then add a residual
         # with `layer_input`.
+
         with tf.variable_scope("output"):
-          attention_output = tf.layers.dense(
+          attention_output = tf.layers.dense(#第二引数は整数で出力する次元を表す
               attention_output,
               hidden_size,
               kernel_initializer=create_initializer(initializer_range))
@@ -864,7 +871,7 @@ def transformer_model(input_tensor,
 
       # The activation is only applied to the "intermediate" hidden layer.
       with tf.variable_scope("intermediate"):
-        intermediate_output = tf.layers.dense(
+        intermediate_output = tf.layers.dense(#第二引数は整数で出力する次元を表す
             attention_output,
             intermediate_size,
             activation=intermediate_act_fn,
@@ -872,7 +879,7 @@ def transformer_model(input_tensor,
 
       # Down-project back to `hidden_size` then add the residual.
       with tf.variable_scope("output"):
-        layer_output = tf.layers.dense(
+        layer_output = tf.layers.dense(#第二引数は整数で出力する次元を表す
             intermediate_output,
             hidden_size,
             kernel_initializer=create_initializer(initializer_range))
@@ -881,6 +888,7 @@ def transformer_model(input_tensor,
         prev_output = layer_output
         all_layer_outputs.append(layer_output)
 
+  #出力
   if do_return_all_layers:
     final_outputs = []
     for layer_output in all_layer_outputs:
