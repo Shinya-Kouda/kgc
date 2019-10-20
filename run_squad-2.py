@@ -195,13 +195,15 @@ class InputFeatures(object):
                tokens,
                input_ids,
                input_mask,
-               segment_ids
+               segment_ids,
+               input_tensors
                ):
     self.unique_id = unique_id
     self.tokens = tokens
     self.input_ids = input_ids
     self.input_mask = input_mask
     self.segment_ids = segment_ids
+    self.input_tensors = input_tensors
 
 
 def read_kg_examples(input_file, is_training):
@@ -342,6 +344,9 @@ def convert_examples_to_features(examples,
           "input_mask: %s" % " ".join([str(x) for x in input_mask]))
       tf.logging.info(
           "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
+    
+    #bertを呼び出して、エンコードする
+    #input_tensors
 
     #InputFeaturesクラスのインスタンスを定義する
     feature = InputFeatures(
@@ -349,7 +354,8 @@ def convert_examples_to_features(examples,
         tokens=tokens,
         input_ids=input_ids,
         input_mask=input_mask,
-        segment_ids=segment_ids
+        segment_ids=segment_ids,
+        input_tensors=input_tensors
         )
 
     # Run callback
@@ -481,18 +487,37 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
 
   return (start_logits, end_logits)
   """
-  final_outputs = modeling.transformer_model(input_tensor=final_hidden_matrix,
+  #Transformer層
+  transformer_outputs = modeling.transformer_model(input_tensor=final_hidden_matrix,
                               attention_mask=None,
-                              hidden_size=768,
-                              num_hidden_layers=12,
-                              num_attention_heads=12,
-                              intermediate_size=3072,
+                              hidden_size=5,
+                              num_hidden_layers=2,
+                              num_attention_heads=2,
+                              intermediate_size=20,
                               intermediate_act_fn=modeling.gelu,
                               hidden_dropout_prob=0.1,
                               attention_probs_dropout_prob=0.1,
                               initializer_range=0.02,
                               do_return_all_layers=False)#現状Falseのみ
-  return final_outputs
+
+  #線型層
+  output_weights = tf.get_variable(
+      #/はスコープの区切りを表す。だからcls/squad/output_weightsはclsスコープのsquadスコープのoutput_weightsという変数を表す
+      #変数がないときは定義し、ある時はそれを呼び出す
+      "cls/squad/output_weights", [30000, 5],
+      initializer=tf.truncated_normal_initializer(stddev=0.02))
+  output_bias = tf.get_variable(
+      #/はスコープの区切りを表す。だからcls/squad/output_weightsはclsスコープのsquadスコープのoutput_weightsという変数を表す
+      #変数がないときは定義し、ある時はそれを呼び出す
+      "cls/squad/output_bias", [30000], initializer=tf.zeros_initializer())
+  logits = tf.matmul(transformer_outputs, output_weights, transpose_b=True)
+  logits = tf.nn.bias_add(logits, output_bias)
+
+  #max
+  ids = tf.reduce_max(logits,axis=0)
+
+  #Transformerのテンソルとidを出力。損失を測るのに両方使うため
+  return (ids,transformer_outputs)
 
 
 #引数を与えたらmodel_fnを返す関数
@@ -515,6 +540,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
     input_ids = features["input_ids"]
     input_mask = features["input_mask"]
     segment_ids = features["segment_ids"]
+    input_tensor = features["input_tensor"]
 
     #trainかどうか
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
@@ -560,117 +586,117 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
     #output_specを出力。trainかpredictかで変わる
     output_spec = None
     if mode == tf.estimator.ModeKeys.TRAIN:
-      seq_length = modeling.get_shape_list(input_ids)[1]
 
       #lossを計算する関数
       #かなり作りこみが必要。たぶん自分で考える必要がある
-      def compute_loss(predict, real, predict_tensor, real_tensor):
+      def compute_loss(predict_ids, real_ids, predict_tensor, real_tensor):
         #リストを整理
-        #スペシャルトークンのアルファベット順にする
+        #スペシャルidのアルファベット順にする
         #このとき、テンソルの方も対応する部分の順番を変える
-        def sort_tokens_tensor(tokens, tensor):#[TODO]まだtensorを反映していない
-          for i in range(len(tokens)):
+        def sort_ids_tensor(ids, tensor):#[TODO]まだtensorを反映していない
+          kg_segment_ids = [1]
+          for i in range(len(ids)):
             p_start = i
-            if tokens[i][0] == '[' and tokens[i][-1] == ']':
-              for j in range(i+1,len(tokens)):
-                if tokens[j][0] == '[' and tokens[j][-1] == ']':
+            if is_special_id(ids[i]):
+              kg_segment_ids.append(kg_segment_ids[-1])
+              for j in range(i+1,len(ids)):
+                if is_special_id(ids[j]):
                   p_end = j
                   next_special_token_start = j
-                  next_special_token = tokens[j]
-                  if next_special_token.lower() < tokens[i].lower():
-                    for k in range(j+1,len(tokens)):
-                      if tokens[k][0] == '[' and tokens[k][-1] == ']':
+                  next_special_token = ids[j]
+                  if next_special_token.lower() < ids[i].lower():
+                    for k in range(j+1,len(ids)):
+                      if is_special_id(ids[k]):
                         next_special_token_end = k
                         break
                       else:
-                        next_special_token_end = len(tokens)
+                        next_special_token_end = len(ids)
                     if p_start == 0:
                       tmp1 = []
                     else:
-                      tmp1 = tokens[:p_start]
-                    tmp2 = tokens[p_start:p_end]
-                    tmp3 = tokens[next_special_token_start:next_special_token_end]
-                    if next_special_token_end == len(tokens):
+                      tmp1 = ids[:p_start]
+                    tmp2 = ids[p_start:p_end]
+                    tmp3 = ids[next_special_token_start:next_special_token_end]
+                    if next_special_token_end == len(ids):
                       tmp4 = []
                     else:
-                      tmp4 = tokens[next_special_token_end:]
-                    tokens = tmp1 + tmp3 + tmp2 + tmp4
+                      tmp4 = ids[next_special_token_end:]
+                    ids = tmp1 + tmp3 + tmp2 + tmp4
                   break
+            else:
+              kg_segment_ids.append(kg_segment_ids[-1])
+          return (ids, kg_segment_ids, tensor)
 
         #スペシャルトークンかどうか判断する関数
-        #トークンの先頭と最後が[]ならtrue
-        def is_special_token(token):
-          if token[0] == '[' and token[-1] == ']':
+        #special_idの辞書オブジェクトを作って、そこに属すならtrue
+        def is_special_id(id):#全部書き直す必要がある
+          tokenization.load_vocab('special_file')
+          if id[0] == '[' and id[-1] == ']':
             return True
           else:
             return False
-        #special tokens loss
+        #special ids loss
         #predictのスペシャルトークンAがrealにもある場合、そのトークンによる損失は０、ない場合は１
         #スペシャルトークンAが複数存在する場合、その個数が同じなら、それらのトークンによる損失は０、同じでないときはその個数
         #これをすべてのトークンに渡り加算する
-        def special_tokens_loss(predict, real):
-          p_specials = {p for p in predict if is_special_token(p)}
-          r_specials = {r for r in real if is_special_token(r)}
+        def special_ids_loss(predict_ids, real_ids):
+          p_specials = {p for p in predict_ids if is_special_id(p)}
+          r_specials = {r for r in real_ids if is_special_id(r)}
           counter = len(p_specials ^ r_specials)
           return counter
-        #other tokens loss
+        #other ids loss
         #等しいスペシャルトークンの後ろのトークン同士の差をロスとする
         #１つのトークンはベクトルで表されるので、ベクトルの間の角でロスを定義する
         #角が０の時ロスも０
         #角が９０度のときロスは１
         #角が１８０度の時ロスは２になるようにする
         #等しいトークンが複数あるときは、それらの間でロスが最も低い組み合わせを選ぶ
-        #等しいトークンがないときは、ロスには加算されない（special_tokens_lossで加算済）
+        #等しいトークンがないときは、ロスには加算されない（special_ids_lossで加算済）
         #等しいトークンがありかつ数が異なるときは、ロスが小さいペアを優先的に結び、ロスが大きいペアは
-        #special_tokens_lossで加算される
-        def other_tokens_loss(predict, real, predict_tensor, real_tensor):
-          #predictのスペシャルトークン１つに着目しインデックスを取得
-
-          #そのトークンと同じトークンがあれば、インデックス（複数もありうる）を取得
-          #realからも探索
+        #special_ids_lossで加算される
+        def other_ids_loss(predict_ids, real_ids, predict_tensor, real_tensor):
+          (predict_ids, predict_kg_ids, predict_tensor) = sort_ids_tensor(predict_ids, predict_tensor)
+          (real_ids, real_kg_ids, real_tensor) = sort_ids_tensor(real_ids, real_tensor)
+          #predict_idsのスペシャルid１つに着目しインデックスを取得
+          for i in range(len(predict_ids)):
+            if is_special_id(predict_ids[i]):
+              p_tpl = zip(predict_ids, predict_kg_ids,predict_tensor)
+              p_tpl1 = [k for (j,k,t) in p_tpl if j == predict_ids[i]]
+              p_tensors = [tf.math.l2_normalize(t) for (j,k,t) in p_tpl if k in p_tpl1]
+              r_tpl = zip(real_ids, real_kg_ids,real_tensor)
+              r_tpl1 = [k for (j,k,t) in r_tpl if j == predict_ids[i]]
+              r_tensors = [tf.math.l2_normalize(t) for (j,k,t) in r_tpl if k in r_tpl1]            
 
           #ロスが最小になる組み合わせを探索
-
+          loss = []
+          for i,pt in enumerate(p_tensors):
+            for j,rt in enumerate(r_tensors):
+              loss.append(1 - tf.matmul(pt, rt, transpose_b=True))
+          loss.sort()
+          loss = sum(loss[:(min([i,j])-1)])
           #ペアができたものはロスに加算して除去
-          #ペアができなかったものはspecial_tokens_lossで加算されているので除くだけ
-
-
-
-
-        one_hot_positions = tf.one_hot(
-            positions, depth=seq_length, dtype=tf.float32)
-        log_probs = tf.nn.log_softmax(logits, axis=-1)
-        loss = -tf.reduce_mean(
-            tf.reduce_sum(one_hot_positions * log_probs, axis=-1))
+          #ペアができなかったものはspecial_ids_lossで加算されているので除くだけ
+          return loss
+        
+        loss = special_ids_loss(predict_ids, real_ids) + other_ids_loss(predict_ids, real_ids, predict_tensor, real_tensor)
         return loss
 
-      #今回はいらない
-      start_positions = features["start_positions"]
-      end_positions = features["end_positions"]
-
-      #positionsは入らない
-      start_loss = compute_loss(start_logits, start_positions)
-      end_loss = compute_loss(end_logits, end_positions)
-
-      #損失関数
-      total_loss = (start_loss + end_loss) / 2.0
+      #loss
+      loss = compute_loss(transformer_outputs[0],input_ids,transformer_outputs[1],input_tensor)
 
       #オプティマイザー
       train_op = optimization.create_optimizer(
-          total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
+          loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
 
       #スペック
       output_spec = tf.contrib.tpu.TPUEstimatorSpec(
           mode=mode,
-          loss=total_loss,
+          loss=loss,
           train_op=train_op,
           scaffold_fn=scaffold_fn)
+          
     elif mode == tf.estimator.ModeKeys.PREDICT:
-      predictions = {
-          "unique_ids": unique_ids,
-          "start_logits": start_logits,
-          "end_logits": end_logits,
-      }
+      predictions = transformer_outputs
       output_spec = tf.contrib.tpu.TPUEstimatorSpec(
           mode=mode, predictions=predictions, scaffold_fn=scaffold_fn)
     else:

@@ -586,7 +586,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
   output_weights = tf.get_variable(
       #/はスコープの区切りを表す。だからcls/squad/output_weightsはclsスコープのsquadスコープのoutput_weightsという変数を表す
       #変数がないときは定義し、ある時はそれを呼び出す
-      "cls/squad/output_weights", [2, hidden_size],
+      "cls/squad/output_weights", [2, hidden_size],#2というのは、start_logitsとend_logitsを作成するために使われる
       initializer=tf.truncated_normal_initializer(stddev=0.02))
 
   output_bias = tf.get_variable(
@@ -596,7 +596,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
 
   final_hidden_matrix = tf.reshape(final_hidden,
                                    [batch_size * seq_length, hidden_size])
-  logits = tf.matmul(final_hidden_matrix, output_weights, transpose_b=True)
+  logits = tf.matmul(final_hidden_matrix, output_weights, transpose_b=True)#第二引数を転置して行列積
   logits = tf.nn.bias_add(logits, output_bias)
 
   logits = tf.reshape(logits, [batch_size, seq_length, 2])
@@ -1189,6 +1189,10 @@ def main(_):
         FLAGS.tpu_name, zone=FLAGS.tpu_zone, project=FLAGS.gcp_project)
   #これはtensorflowがversion2のときということかな
   is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
+  #たぶんこのRunConfigが、学習時と予測時のestimatorの挙動を決めている
+  #学習時はモデルを構築し、予測時はすでに存在してるモデルを使って予測を行う、というように
+  #do_trainやdo_predictといったフラグを入力する必要はなく、学習時と予測時の挙動を両方持っている
+  #estimatorが呼ばれた時にestimator.trainなのかestimator.predictなのかで設定が変わる？
   run_config = tf.contrib.tpu.RunConfig(
       cluster=tpu_cluster_resolver,
       master=FLAGS.master,
