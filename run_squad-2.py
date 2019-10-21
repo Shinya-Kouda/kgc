@@ -639,6 +639,8 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
             p_tpl = zip(predict_ids, predict_kg_ids,predict_tensor)
             p_tpl1 = [k for (j,k,t) in p_tpl if j == predict_ids[i]]
             p_tensors = [tf.math.l2_normalize(t) for (j,k,t) in p_tpl if k in p_tpl1]
+            #上をreshape
+            p_sum = tf.reduce_sum(p_tensors, axis=1)
             r_tpl = zip(real_ids, real_kg_ids,real_tensor)
             r_tpl1 = [k for (j,k,t) in r_tpl if j == predict_ids[i]]
             r_tensors = [tf.math.l2_normalize(t) for (j,k,t) in r_tpl if k in r_tpl1]            
