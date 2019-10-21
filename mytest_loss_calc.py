@@ -5,15 +5,19 @@ r_tensors = tf.constant([[4,5,6],[12,8,1]])
 loss = tf.matmul(p_tensors, r_tensors, transpose_b=True)
 loss = tf.reduce_min(loss)
 
+res = []
+input = tf.reduce_sum(p_tensors,axis=0)
+res.append(input)
+input = res
 
-loss = []
-for i,pt in enumerate(p_tensors):
-  for j,rt in enumerate(r_tensors):
-    loss.append(1 - tf.matmul(pt, rt, transpose_b=True))
-loss.sort()
-loss = sum(loss[:(min([i,j])-1)]]
+# loss = []
+# for i,pt in enumerate(p_tensors):
+#   for j,rt in enumerate(r_tensors):
+#     loss.append(1 - tf.matmul(pt, rt, transpose_b=True))
+# loss.sort()
+# loss = sum(loss[:(min([i,j])-1)]]
 
 
 with tf.Session() as sess:
-  losp = sess.run(loss)
+  losp = sess.run(input)
   print(losp)

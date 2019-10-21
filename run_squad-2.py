@@ -634,22 +634,24 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
         (predict_ids, predict_kg_ids) = add_segment_ids(predict_ids)
         (real_ids, real_kg_ids) = add_segment_ids(real_ids)
         #predict_idsのスペシャルid１つに着目しインデックスを取得
+        loss = []
+        p_tpl = zip(predict_ids, predict_kg_ids,predict_tensor)
+        r_tpl = zip(real_ids, real_kg_ids,real_tensor)
         for i in range(len(predict_ids)):
           if is_special_id(predict_ids[i]):
-            p_tpl = zip(predict_ids, predict_kg_ids,predict_tensor)
-            p_tpl1 = [k for (j,k,t) in p_tpl if j == predict_ids[i]]
-            p_tensors = [tf.math.l2_normalize(t) for (j,k,t) in p_tpl if k in p_tpl1]
-            #上をreshape
-            p_sum = tf.reduce_sum(p_tensors, axis=1)
-            r_tpl = zip(real_ids, real_kg_ids,real_tensor)
-            r_tpl1 = [k for (j,k,t) in r_tpl if j == predict_ids[i]]
-            r_tensors = [tf.math.l2_normalize(t) for (j,k,t) in r_tpl if k in r_tpl1]            
+            p_tpl1 = {k for (j,k,t) in p_tpl if j == predict_ids[i]}
+            p_tensors = []
+            for k in p_tpl1:
+              p_tensors.append(tf.reduce_sum([tf.math.l2_normalize(t) for (j,k,t) in p_tpl if not is_special_id(j)],axis=0))
+            r_tpl1 = {k for (j,k,t) in r_tpl if j == real_ids[i]}
+            r_tensors = []
+            for k in r_tpl1:
+              r_tensors.append(tf.reduce_sum([tf.math.l2_normalize(t) for (j,k,t) in r_tpl if not is_special_id(j)],axis=0))
 
-        #ロスが最小になる組み合わせを探索
-        loss = []
-        for i,pt in enumerate(p_tensors):
-          for j,rt in enumerate(r_tensors):
-            loss.append(1 - tf.matmul(pt, rt, transpose_b=True))
+          #ロスが最小になる組み合わせを探索
+          for i,pt in enumerate(p_tensors):
+            for j,rt in enumerate(r_tensors):
+              loss.append(1 - tf.matmul(pt, rt, transpose_b=True))
         loss.sort()
         loss = sum(loss[:(min([i,j])-1)])
         #ペアができたものはロスに加算して除去
