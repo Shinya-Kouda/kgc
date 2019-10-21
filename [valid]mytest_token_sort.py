@@ -30,3 +30,28 @@ for i in range(len(predict)):
                 break
     
 print(predict_sorted)
+
+def is_special_id(id):#全部書き直す必要がある
+    f = open('../01_raw/cased_L-12_H-768_A-12/vocab.txt')
+    lines2 = f.readlines() # 1行毎にファイル終端まで全て読む(改行文字も含まれる)
+    f.close()
+    # lines2: リスト。要素は1行の文字列データ
+    special_ids = []
+    for line in lines2:
+        if line[0] == '[' and line[-2] == ']':
+            special_ids.append(line[:-1])
+    if id in special_ids:
+        return True
+    else:
+        return False
+
+def add_segment_ids(ids):
+    kg_segment_ids = [0]
+    for i in range(len(ids)):
+        if ids[i][0] == '[' and ids[i][-1] == ']':
+            kg_segment_ids.append(kg_segment_ids[-1]+1)
+        else:
+            kg_segment_ids.append(kg_segment_ids[-1])
+    return (ids, kg_segment_ids[1:])
+
+print(add_segment_ids(predict))

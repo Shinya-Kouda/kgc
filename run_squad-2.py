@@ -536,7 +536,6 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
       tf.logging.info("  name = %s, shape = %s" % (name, features[name].shape))
 
     #featuresからデータ取得
-    unique_ids = features["unique_ids"]
     input_ids = features["input_ids"]
     input_mask = features["input_mask"]
     segment_ids = features["segment_ids"]
@@ -587,97 +586,77 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
     output_spec = None
     if mode == tf.estimator.ModeKeys.TRAIN:
 
+      #スペシャルトークンかどうか判断する関数
+      #special_idの辞書オブジェクトを作って、そこに属すならtrue
+      def is_special_id(id):#全部書き直す必要がある
+        f = open('../01_raw/cased_L-12_H-768_A-12/vocab.txt')
+        lines2 = f.readlines() # 1行毎にファイル終端まで全て読む(改行文字も含まれる)
+        f.close()
+        # lines2: リスト。要素は1行の文字列データ
+        special_ids = []
+        for line in lines2:
+          if line[0] == '[' and line[-2] == ']':
+            special_ids.append(line[:-1])
+        if id in special_ids:
+          return True
+        else:
+          return False
+
+      def add_segment_ids(ids):
+        kg_segment_ids = [0]
+        for i in range(len(ids)):
+          if is_special_id(ids[i]):
+            kg_segment_ids.append(kg_segment_ids[-1]+1)
+          else:
+            kg_segment_ids.append(kg_segment_ids[-1])
+        return (ids, kg_segment_ids[1:])
+
+      #special ids loss
+      #predictのスペシャルトークンAがrealにもある場合、そのトークンによる損失は０、ない場合は１
+      #スペシャルトークンAが複数存在する場合、その個数が同じなら、それらのトークンによる損失は０、同じでないときはその個数
+      #これをすべてのトークンに渡り加算する
+      def special_ids_loss(predict_ids, real_ids):
+        p_specials = {p for p in predict_ids if is_special_id(p)}
+        r_specials = {r for r in real_ids if is_special_id(r)}
+        counter = len(p_specials ^ r_specials)
+        return counter
+      #other ids loss
+      #等しいスペシャルトークンの後ろのトークン同士の差をロスとする
+      #１つのトークンはベクトルで表されるので、ベクトルの間の角でロスを定義する
+      #角が０の時ロスも０
+      #角が９０度のときロスは１
+      #角が１８０度の時ロスは２になるようにする
+      #等しいトークンが複数あるときは、それらの間でロスが最も低い組み合わせを選ぶ
+      #等しいトークンがないときは、ロスには加算されない（special_ids_lossで加算済）
+      #等しいトークンがありかつ数が異なるときは、ロスが小さいペアを優先的に結び、ロスが大きいペアは
+      #special_ids_lossで加算される
+      def other_ids_loss(predict_ids, real_ids, predict_tensor, real_tensor):
+        (predict_ids, predict_kg_ids) = add_segment_ids(predict_ids)
+        (real_ids, real_kg_ids) = add_segment_ids(real_ids)
+        #predict_idsのスペシャルid１つに着目しインデックスを取得
+        for i in range(len(predict_ids)):
+          if is_special_id(predict_ids[i]):
+            p_tpl = zip(predict_ids, predict_kg_ids,predict_tensor)
+            p_tpl1 = [k for (j,k,t) in p_tpl if j == predict_ids[i]]
+            p_tensors = [tf.math.l2_normalize(t) for (j,k,t) in p_tpl if k in p_tpl1]
+            r_tpl = zip(real_ids, real_kg_ids,real_tensor)
+            r_tpl1 = [k for (j,k,t) in r_tpl if j == predict_ids[i]]
+            r_tensors = [tf.math.l2_normalize(t) for (j,k,t) in r_tpl if k in r_tpl1]            
+
+        #ロスが最小になる組み合わせを探索
+        loss = []
+        for i,pt in enumerate(p_tensors):
+          for j,rt in enumerate(r_tensors):
+            loss.append(1 - tf.matmul(pt, rt, transpose_b=True))
+        loss.sort()
+        loss = sum(loss[:(min([i,j])-1)])
+        #ペアができたものはロスに加算して除去
+        #ペアができなかったものはspecial_ids_lossで加算されているので除くだけ
+        return loss
+
       #lossを計算する関数
       #かなり作りこみが必要。たぶん自分で考える必要がある
       def compute_loss(predict_ids, real_ids, predict_tensor, real_tensor):
-        #リストを整理
-        #スペシャルidのアルファベット順にする
-        #このとき、テンソルの方も対応する部分の順番を変える
-        def sort_ids_tensor(ids, tensor):#[TODO]まだtensorを反映していない
-          kg_segment_ids = [1]
-          for i in range(len(ids)):
-            p_start = i
-            if is_special_id(ids[i]):
-              kg_segment_ids.append(kg_segment_ids[-1])
-              for j in range(i+1,len(ids)):
-                if is_special_id(ids[j]):
-                  p_end = j
-                  next_special_token_start = j
-                  next_special_token = ids[j]
-                  if next_special_token.lower() < ids[i].lower():
-                    for k in range(j+1,len(ids)):
-                      if is_special_id(ids[k]):
-                        next_special_token_end = k
-                        break
-                      else:
-                        next_special_token_end = len(ids)
-                    if p_start == 0:
-                      tmp1 = []
-                    else:
-                      tmp1 = ids[:p_start]
-                    tmp2 = ids[p_start:p_end]
-                    tmp3 = ids[next_special_token_start:next_special_token_end]
-                    if next_special_token_end == len(ids):
-                      tmp4 = []
-                    else:
-                      tmp4 = ids[next_special_token_end:]
-                    ids = tmp1 + tmp3 + tmp2 + tmp4
-                  break
-            else:
-              kg_segment_ids.append(kg_segment_ids[-1])
-          return (ids, kg_segment_ids, tensor)
-
-        #スペシャルトークンかどうか判断する関数
-        #special_idの辞書オブジェクトを作って、そこに属すならtrue
-        def is_special_id(id):#全部書き直す必要がある
-          tokenization.load_vocab('special_file')
-          if id[0] == '[' and id[-1] == ']':
-            return True
-          else:
-            return False
-        #special ids loss
-        #predictのスペシャルトークンAがrealにもある場合、そのトークンによる損失は０、ない場合は１
-        #スペシャルトークンAが複数存在する場合、その個数が同じなら、それらのトークンによる損失は０、同じでないときはその個数
-        #これをすべてのトークンに渡り加算する
-        def special_ids_loss(predict_ids, real_ids):
-          p_specials = {p for p in predict_ids if is_special_id(p)}
-          r_specials = {r for r in real_ids if is_special_id(r)}
-          counter = len(p_specials ^ r_specials)
-          return counter
-        #other ids loss
-        #等しいスペシャルトークンの後ろのトークン同士の差をロスとする
-        #１つのトークンはベクトルで表されるので、ベクトルの間の角でロスを定義する
-        #角が０の時ロスも０
-        #角が９０度のときロスは１
-        #角が１８０度の時ロスは２になるようにする
-        #等しいトークンが複数あるときは、それらの間でロスが最も低い組み合わせを選ぶ
-        #等しいトークンがないときは、ロスには加算されない（special_ids_lossで加算済）
-        #等しいトークンがありかつ数が異なるときは、ロスが小さいペアを優先的に結び、ロスが大きいペアは
-        #special_ids_lossで加算される
-        def other_ids_loss(predict_ids, real_ids, predict_tensor, real_tensor):
-          (predict_ids, predict_kg_ids, predict_tensor) = sort_ids_tensor(predict_ids, predict_tensor)
-          (real_ids, real_kg_ids, real_tensor) = sort_ids_tensor(real_ids, real_tensor)
-          #predict_idsのスペシャルid１つに着目しインデックスを取得
-          for i in range(len(predict_ids)):
-            if is_special_id(predict_ids[i]):
-              p_tpl = zip(predict_ids, predict_kg_ids,predict_tensor)
-              p_tpl1 = [k for (j,k,t) in p_tpl if j == predict_ids[i]]
-              p_tensors = [tf.math.l2_normalize(t) for (j,k,t) in p_tpl if k in p_tpl1]
-              r_tpl = zip(real_ids, real_kg_ids,real_tensor)
-              r_tpl1 = [k for (j,k,t) in r_tpl if j == predict_ids[i]]
-              r_tensors = [tf.math.l2_normalize(t) for (j,k,t) in r_tpl if k in r_tpl1]            
-
-          #ロスが最小になる組み合わせを探索
-          loss = []
-          for i,pt in enumerate(p_tensors):
-            for j,rt in enumerate(r_tensors):
-              loss.append(1 - tf.matmul(pt, rt, transpose_b=True))
-          loss.sort()
-          loss = sum(loss[:(min([i,j])-1)])
-          #ペアができたものはロスに加算して除去
-          #ペアができなかったものはspecial_ids_lossで加算されているので除くだけ
-          return loss
-        
         loss = special_ids_loss(predict_ids, real_ids) + other_ids_loss(predict_ids, real_ids, predict_tensor, real_tensor)
         return loss
 
