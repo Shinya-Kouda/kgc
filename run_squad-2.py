@@ -648,14 +648,20 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
             for k in r_tpl1:
               r_tensors.append(tf.reduce_sum([tf.math.l2_normalize(t) for (j,k,t) in r_tpl if not is_special_id(j)],axis=0))
 
-          #ロスが最小になる組み合わせを探索
+          #ロスが最小になる組み合わせを貪欲法で探索
+          #ペアができたものはロスに加算して
+          #ペアができなかったものはspecial_ids_lossで加算されているので除くだけ
+          vec_tmp = []
           for i,pt in enumerate(p_tensors):
             for j,rt in enumerate(r_tensors):
-              loss.append(1 - tf.matmul(pt, rt, transpose_b=True))
-        loss.sort()
-        loss = sum(loss[:(min([i,j])-1)])
-        #ペアができたものはロスに加算して除去
-        #ペアができなかったものはspecial_ids_lossで加算されているので除くだけ
+              vec_tmp.append((1 - tf.matmul(pt, rt, transpose_b=True)),i,j)
+          vec_tmp.sort()
+          counter = 0
+          while counter <= min([i,j]):
+            loss += vec_tmp[counter][0]
+            vec_tmp = [(loss,i,j) for (loss,i,j) in vec_tmp if i != vec_tmp[counter][1] and j != vec_tmp[counter][2]]
+            counter += 1
+          
         return loss
 
       #lossを計算する関数
