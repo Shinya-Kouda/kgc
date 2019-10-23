@@ -280,6 +280,7 @@ def convert_examples_to_features(examples,
                                  output_fn
                                  ):
   """Loads a data file into a list of `InputBatch`s."""
+  #返り値はないが、この関数を実行するとInputFeaturesクラスのインスタンスが読み込まれる
 
   unique_id = 1000000000#exampleごとに１ずつ足してく
   max_seq_length = max_nlr_length + max_kgr_length + 3
@@ -749,7 +750,7 @@ def input_fn_builder(input_file, seq_length, is_training, drop_remainder):
   return input_fn
 
 
-#何に使うのかまだわからない
+#予測結果をこのオブジェクトに格納して、下のwritepredictionで書き出すのでここで定義する
 RawResult = collections.namedtuple("RawResult",
                                    ["unique_id", "start_logits", "end_logits"])
 
@@ -1152,7 +1153,7 @@ def main(_):
   validate_flags_or_throw(bert_config)
   #ディレクトリ作成
   tf.gfile.MakeDirs(FLAGS.output_dir)
-  #トークン化
+  #トークナイザー
   tokenizer = tokenization.FullTokenizer(
       vocab_file=FLAGS.vocab_file, do_lower_case=FLAGS.do_lower_case)
   #tpuあるなら設定
@@ -1162,6 +1163,8 @@ def main(_):
         FLAGS.tpu_name, zone=FLAGS.tpu_zone, project=FLAGS.gcp_project)
   #これはtensorflowがversion2のときということかな
   is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
+  #モデリングの設定
+  #モデルオブジェクトの出力先などもここで設定する
   run_config = tf.contrib.tpu.RunConfig(
       cluster=tpu_cluster_resolver,
       master=FLAGS.master,
@@ -1178,7 +1181,7 @@ def main(_):
 
   #学習するときの事前処理、シャッフルする
   if FLAGS.do_train:
-    train_examples = read_squad_examples(
+    train_examples = read_kg_examples(
         input_file=FLAGS.train_file, is_training=True)
     num_train_steps = int(
         len(train_examples) / FLAGS.train_batch_size * FLAGS.num_train_epochs)
@@ -1247,7 +1250,7 @@ def main(_):
 
   #予測するとき
   if FLAGS.do_predict:
-    eval_examples = read_squad_examples(
+    eval_examples = read_kg_examples(
         input_file=FLAGS.predict_file, is_training=False)
 
     eval_writer = FeatureWriter(
@@ -1289,23 +1292,27 @@ def main(_):
         predict_input_fn, yield_single_examples=True):
       if len(all_results) % 1000 == 0:
         tf.logging.info("Processing example: %d" % (len(all_results)))
-      unique_id = int(result["unique_ids"])
-      start_logits = [float(x) for x in result["start_logits"].flat]
-      end_logits = [float(x) for x in result["end_logits"].flat]
-      all_results.append(
-          RawResult(
-              unique_id=unique_id,
-              start_logits=start_logits,
-              end_logits=end_logits))
+      #書き込みたいものをforループで集める
+      tokens = tokenizer.convert_ids_to_tokens[result["ids"]]
+      # unique_id = int(result["unique_ids"])
+      # start_logits = [float(x) for x in result["start_logits"].flat]
+      # end_logits = [float(x) for x in result["end_logits"].flat]
+      # all_results.append(
+      #     RawResult(
+      #         unique_id=unique_id,
+      #         start_logits=start_logits,
+      #         end_logits=end_logits))
 
-    output_prediction_file = os.path.join(FLAGS.output_dir, "predictions.json")
-    output_nbest_file = os.path.join(FLAGS.output_dir, "nbest_predictions.json")
-    output_null_log_odds_file = os.path.join(FLAGS.output_dir, "null_odds.json")
+    # output_prediction_file = os.path.join(FLAGS.output_dir, "predictions.json")
+    # output_nbest_file = os.path.join(FLAGS.output_dir, "nbest_predictions.json")
+    # output_null_log_odds_file = os.path.join(FLAGS.output_dir, "null_odds.json")
 
-    write_predictions(eval_examples, eval_features, all_results,
-                      FLAGS.n_best_size, FLAGS.max_answer_length,
-                      FLAGS.do_lower_case, output_prediction_file,
-                      output_nbest_file, output_null_log_odds_file)
+    # write_predictions(eval_examples, eval_features, all_results,
+    #                   FLAGS.n_best_size, FLAGS.max_answer_length,
+    #                   FLAGS.do_lower_case, output_prediction_file,
+    #                   output_nbest_file, output_null_log_odds_file)
+
+    
 
 
 if __name__ == "__main__":
