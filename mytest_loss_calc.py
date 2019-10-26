@@ -34,12 +34,13 @@ def add_segment_ids(ids):
   return (ids, kg_segment_ids[1:])
 
 def other_ids_loss(predict_ids, real_ids, predict_tensor, real_tensor):
+  #スペシャルトークンごとにセグメントidを付与する
   (predict_ids, predict_kg_ids) = add_segment_ids(predict_ids)
   (real_ids, real_kg_ids) = add_segment_ids(real_ids)
   #predict_idsのスペシャルid１つに着目しインデックスを取得
   loss = 0
-  p_tpl = zip(predict_ids, predict_kg_ids,range(len(predict_ids)))
-  r_tpl = zip(real_ids, real_kg_ids,range(len(predict_ids)))
+  #predictとrealのidの中から、同じスペシャルトークンを取得し、ペアを作り、ロスを算出する
+  #ペアができないものは、すでにスペシャルトークンのロス関数で計算されているので無視する
   for i in range(len(predict_ids)):
     if is_special_id(predict_ids[i]):
       p_tpl1 = set()

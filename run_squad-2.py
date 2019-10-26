@@ -355,7 +355,7 @@ def convert_examples_to_features(examples,
         input_ids=input_ids,
         input_mask=input_mask,
         segment_ids=segment_ids,
-        input_tensors=input_tensors
+        input_tensors=None
         )
 
     # Run callback
@@ -488,6 +488,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
   return (start_logits, end_logits)
   """
   #Transformer層
+  #bertの中のtransformerよりずっとスペック低くしている
   transformer_outputs = modeling.transformer_model(input_tensor=final_hidden_matrix,
                               attention_mask=None,
                               hidden_size=5,
@@ -588,16 +589,15 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
 
       #スペシャルトークンかどうか判断する関数
       #special_idの辞書オブジェクトを作って、そこに属すならtrue
-      def is_special_id(id):#全部書き直す必要がある
-        f = open('../01_raw/cased_L-12_H-768_A-12/vocab.txt')
-        lines2 = f.readlines() # 1行毎にファイル終端まで全て読む(改行文字も含まれる)
-        f.close()
-        # lines2: リスト。要素は1行の文字列データ
-        special_ids = []
-        for line in lines2:
-          if line[0] == '[' and line[-2] == ']':
-            special_ids.append(line[:-1])
-        if id in special_ids:
+      def is_special_id(id):
+        vocab = tokenization.load_vocab(FLAGS.vocab_file)
+        inv_vocab = {v:k for k,v in vocab.items()}
+        special_tokens = []
+        for token in vocab.keys():
+          if len(token) >= 2:
+            if token[0] == '[' and token[-1] == ']':
+              special_tokens.append(token)
+        if tokenization.convert_ids_to_tokens(inv_vocab, [id])[0] in special_tokens:
           return True
         else:
           return False
@@ -631,36 +631,59 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
       #等しいトークンがありかつ数が異なるときは、ロスが小さいペアを優先的に結び、ロスが大きいペアは
       #special_ids_lossで加算される
       def other_ids_loss(predict_ids, real_ids, predict_tensor, real_tensor):
+        #スペシャルトークンごとにセグメントidを付与する
         (predict_ids, predict_kg_ids) = add_segment_ids(predict_ids)
         (real_ids, real_kg_ids) = add_segment_ids(real_ids)
         #predict_idsのスペシャルid１つに着目しインデックスを取得
-        loss = []
-        p_tpl = zip(predict_ids, predict_kg_ids,predict_tensor)
-        r_tpl = zip(real_ids, real_kg_ids,real_tensor)
+        loss = 0
+        #predictとrealのidの中から、同じスペシャルトークンを取得し、ペアを作り、ロスを算出する
+        #ペアができないものは、すでにスペシャルトークンのロス関数で計算されているので無視する
         for i in range(len(predict_ids)):
           if is_special_id(predict_ids[i]):
-            p_tpl1 = {k for (j,k,t) in p_tpl if j == predict_ids[i]}
+            p_tpl1 = set()
+            for l in range(len(predict_ids)):
+              if predict_ids[l] == predict_ids[i]:
+                p_tpl1.add(predict_kg_ids[l])
             p_tensors = []
-            for k in p_tpl1:
-              p_tensors.append(tf.reduce_sum([tf.math.l2_normalize(t) for (j,k,t) in p_tpl if not is_special_id(j)],axis=0))
-            r_tpl1 = {k for (j,k,t) in r_tpl if j == real_ids[i]}
-            r_tensors = []
-            for k in r_tpl1:
-              r_tensors.append(tf.reduce_sum([tf.math.l2_normalize(t) for (j,k,t) in r_tpl if not is_special_id(j)],axis=0))
+            normalized_list = []
+            for k2 in p_tpl1:
+              for l3 in range(len(predict_ids)):
+                if predict_kg_ids[l3] == k2:
+                  if not is_special_id(predict_ids[l3]):
+                    normalized_list.append(predict_tensor[l3,:])
+            normalized_tensor = tf.stack(normalized_list)
+            p_tensors.append(tf.math.l2_normalize(tf.reduce_sum(normalized_tensor,axis=0)))
 
-          #ロスが最小になる組み合わせを貪欲法で探索
-          #ペアができたものはロスに加算して
-          #ペアができなかったものはspecial_ids_lossで加算されているので除くだけ
-          vec_tmp = []
-          for i,pt in enumerate(p_tensors):
-            for j,rt in enumerate(r_tensors):
-              vec_tmp.append((1 - tf.matmul(pt, rt, transpose_b=True)),i,j)
-          vec_tmp.sort()
-          counter = 0
-          while counter <= min([i,j]):
-            loss += vec_tmp[counter][0]
-            vec_tmp = [(loss,i,j) for (loss,i,j) in vec_tmp if i != vec_tmp[counter][1] and j != vec_tmp[counter][2]]
-            counter += 1
+            r_tpl1 = set()
+            for l in range(len(real_ids)):
+              if real_ids[l] == real_ids[i]:
+                r_tpl1.add(real_kg_ids[l])
+            r_tensors = []
+            normalized_list = []
+            for k2 in r_tpl1:
+              for l3 in range(len(real_ids)):
+                if real_kg_ids[l3] == k2:
+                  if not is_special_id(real_ids[l3]):
+                    normalized_list.append(real_tensor[l3,:])
+            normalized_tensor = tf.stack(normalized_list)
+            r_tensors.append(tf.math.l2_normalize(tf.reduce_sum(normalized_tensor,axis=0)))
+            #ロスが最小になる組み合わせを貪欲法で探索
+            #ペアができたものはロスに加算して
+            #ペアができなかったものはspecial_ids_lossで加算されているので除くだけ
+            vec_tmp = []
+            for i,pt in enumerate(p_tensors):
+              for j,rt in enumerate(r_tensors):
+                pt = tf.reshape(pt,[1,3])
+                rt = tf.reshape(rt,[1,3])
+                inner_product = tf.matmul(pt, rt, transpose_b=True)
+                inner_product = tf.reshape(inner_product,[1])
+                vec_tmp.append((tf.subtract(tf.constant(1,dtype=float),inner_product),i,j))
+            vec_tmp.sort()
+            counter = 0
+            while counter <= min([i,j]):
+              loss += vec_tmp[counter][0]
+              vec_tmp = [(loss,i,j) for (loss,i,j) in vec_tmp if i != vec_tmp[counter][1] and j != vec_tmp[counter][2]]
+              counter += 1
           
         return loss
 
@@ -1217,7 +1240,7 @@ def main(_):
     train_writer = FeatureWriter(
         filename=os.path.join(FLAGS.output_dir, "train.tf_record"),
         is_training=True)
-    convert_examples_to_features(#返り値はInputFeaturesクラスのインスタンス
+    convert_examples_to_features(#この関数自身に返り値はないが、別の関数が実行され結果としてInputFeaturesクラスのインスタンスができる
         examples=train_examples,
         tokenizer=tokenizer,
         max_seq_length=FLAGS.max_seq_length,
