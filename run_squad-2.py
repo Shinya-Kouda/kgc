@@ -238,29 +238,30 @@ def read_kg_examples(input_file, is_training):
           nlr_tokens[-1] += c
         prev_is_whitespace = False
       char_to_word_offset.append(len(nlr_tokens) - 1)
-
-    #kgrの方も同様の処理
-    id=data["id"]
-    kgr_text = data["kgr"]
-    kgr_tokens = []
-    char_to_word_offset = []
-    prev_is_whitespace = True
-    for c in kgr_text:
-      if is_whitespace(c):
-        prev_is_whitespace = True
-      else:
-        if prev_is_whitespace:
-          kgr_tokens.append(c)
-        else:
-          kgr_tokens[-1] += c
-        prev_is_whitespace = False
-      char_to_word_offset.append(len(kgr_tokens) - 1)
     
+    #学習時はkgrの方も同様の処理
     if is_training:
       #もしkgrにあたるものがなかったらエラー
       if (len(data["kgr"]) != 1):
         raise ValueError(
             "knowledge graph representation is =0 or <=2.")
+      id=data["id"]
+      kgr_text = data["kgr"]
+      kgr_tokens = []
+      char_to_word_offset = []
+      prev_is_whitespace = True
+      for c in kgr_text:
+        if is_whitespace(c):
+          prev_is_whitespace = True
+        else:
+          if prev_is_whitespace:
+            kgr_tokens.append(c)
+          else:
+            kgr_tokens[-1] += c
+          prev_is_whitespace = False
+        char_to_word_offset.append(len(kgr_tokens) - 1)
+    else:
+      kgr_tokens = None
 
     #ここまでで得たデータをKGExampleクラスのインスタンスに変換する
     example = KGExample(
@@ -274,6 +275,40 @@ def read_kg_examples(input_file, is_training):
 
   return examples
 
+def make_dict_vocab_to_tensor(bert_config):
+  """make dictionary vocabulary to BERT output tensor."""
+  #BERTの設定読み込み
+
+  #BERTモデル構築
+  #vocabファイルを読み込み、語彙リストをつくる
+  vocab = tokenization.load_vocab(FLAGS.vocab_file)
+  #input_idsを作る（０スタートで語彙の数のぶんだけ）
+  input_ids = list(range(len(vocab)))
+  #input_maskを作る（全部０だと思う）
+  input_mask = [0] * (len(vocab)+1)
+  #segment_idsを作る（全部０だと思う）
+  segment_ids = [0] * (len(vocab)+1)
+
+  for i in range(len(vocab)):
+    model = modeling.BertModel(
+      config=bert_config,
+      is_training=False,
+      input_ids=input_ids[i],
+      input_mask=input_mask[i],
+      token_type_ids=segment_ids[i],
+      use_one_hot_embeddings=False)
+      
+    #vocabリストをBERTモデルに投入
+    final_hidden = model.get_sequence_output()#Bertの最終層
+
+    #デバッグ用。終わったら取り除く
+    # final_hidden_shape = modeling.get_shape_list(final_hidden, expected_rank=3)
+    # batch_size = final_hidden_shape[0]
+    # seq_length = final_hidden_shape[1]
+    # hidden_size = final_hidden_shape[2]
+
+  return final_hidden
+
 
 
 def convert_examples_to_features(examples,
@@ -281,7 +316,8 @@ def convert_examples_to_features(examples,
                                  max_nlr_length,
                                  max_kgr_length,
                                  is_training,
-                                 output_fn
+                                 output_fn,
+                                 input_tensors
                                  ):
   """Loads a data file into a list of `InputBatch`s."""
   #返り値はないが、この関数を実行するとInputFeaturesクラスのインスタンスが読み込まれる
@@ -351,6 +387,7 @@ def convert_examples_to_features(examples,
           "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
     
     #bertを呼び出して、トークンをエンコードする
+    #予めvocabをすべてエンコードしておいて、それを読み込む形にする
     #スペシャルトークンは全部０にする
     ##理由１：スペシャルトークンは本家BERTのvocabにないから
     ##理由２：あとで１つのスペシャルトークンに対するトークンたちのテンソルを足しあげるから
@@ -363,7 +400,7 @@ def convert_examples_to_features(examples,
         input_ids=input_ids,
         input_mask=input_mask,
         segment_ids=segment_ids,
-        input_tensors=None
+        input_tensors=input_tensors
         )
 
     # Run callback
@@ -545,16 +582,17 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
       tf.logging.info("  name = %s, shape = %s" % (name, features[name].shape))
 
     #featuresからデータ取得
+    unique_ids = features["unique_ids"]
     input_ids = features["input_ids"]
     input_mask = features["input_mask"]
     segment_ids = features["segment_ids"]
-    input_tensor = features["input_tensor"]#いらない
+    input_tensors = features["input_tensors"]
 
     #trainかどうか
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
 
     #モデル作成
-    (estimated_ids,estimated_tensor) = create_model(
+    (estimated_ids,estimated_tensors) = create_model(
         bert_config=bert_config,
         is_training=is_training,
         input_ids=input_ids,
@@ -702,7 +740,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
         return loss
 
       #loss
-      loss = compute_loss(estimated_ids,input_ids,estimated_tensor,input_tensor)
+      loss = compute_loss(estimated_ids,input_ids,estimated_tensors,input_tensors)
 
       #オプティマイザー
       train_op = optimization.create_optimizer(
@@ -716,7 +754,10 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
           scaffold_fn=scaffold_fn)
           
     elif mode == tf.estimator.ModeKeys.PREDICT:
-      predictions = transformer_outputs
+      predictions = {
+        "unique_ids": unique_ids,
+        "ids": estimated_ids
+      }
       output_spec = tf.contrib.tpu.TPUEstimatorSpec(
           mode=mode, predictions=predictions, scaffold_fn=scaffold_fn)
     else:
@@ -785,306 +826,306 @@ RawResult = collections.namedtuple("RawResult",
                                    ["unique_id", "start_logits", "end_logits"])
 
 
-#最終的な予測結果をjsonに書き出す関数
-def write_predictions(all_examples, all_features, all_results, n_best_size,
-                      max_answer_length, do_lower_case, output_prediction_file,
-                      output_nbest_file, output_null_log_odds_file):
-  """Write final predictions to the json file and log-odds of null if needed."""
-  tf.logging.info("Writing predictions to: %s" % (output_prediction_file))
-  tf.logging.info("Writing nbest to: %s" % (output_nbest_file))
+# #最終的な予測結果をjsonに書き出す関数
+# def write_predictions(all_examples, all_features, all_results, n_best_size,
+#                       max_answer_length, do_lower_case, output_prediction_file,
+#                       output_nbest_file, output_null_log_odds_file):
+#   """Write final predictions to the json file and log-odds of null if needed."""
+#   tf.logging.info("Writing predictions to: %s" % (output_prediction_file))
+#   tf.logging.info("Writing nbest to: %s" % (output_nbest_file))
 
-  #辞書か関数のようなものを作っている
-  example_index_to_features = collections.defaultdict(list)#これは何だろう。関数？辞書？
-  for feature in all_features:
-    example_index_to_features[feature.example_index].append(feature)
+#   #辞書か関数のようなものを作っている
+#   example_index_to_features = collections.defaultdict(list)#これは何だろう。関数？辞書？
+#   for feature in all_features:
+#     example_index_to_features[feature.example_index].append(feature)
 
-  #結果のユニークな集合
-  unique_id_to_result = {}
-  for result in all_results:
-    unique_id_to_result[result.unique_id] = result
+#   #結果のユニークな集合
+#   unique_id_to_result = {}
+#   for result in all_results:
+#     unique_id_to_result[result.unique_id] = result
 
-  #予測結果を集めるタプル？
-  _PrelimPrediction = collections.namedtuple(  # pylint: disable=invalid-name
-      "PrelimPrediction",
-      ["feature_index", "start_index", "end_index", "start_logit", "end_logit"])
+#   #予測結果を集めるタプル？
+#   _PrelimPrediction = collections.namedtuple(  # pylint: disable=invalid-name
+#       "PrelimPrediction",
+#       ["feature_index", "start_index", "end_index", "start_logit", "end_logit"])
 
-  #何かわからない。何らかのモデリング結果ぽい
-  all_predictions = collections.OrderedDict()
-  all_nbest_json = collections.OrderedDict()
-  scores_diff_json = collections.OrderedDict()
+#   #何かわからない。何らかのモデリング結果ぽい
+#   all_predictions = collections.OrderedDict()
+#   all_nbest_json = collections.OrderedDict()
+#   scores_diff_json = collections.OrderedDict()
 
-  #全てのサンプルにわたって以下を行う
-  for (example_index, example) in enumerate(all_examples):
-    #サンプルのインデックスのfeaturesをとってくる
-    features = example_index_to_features[example_index]
+#   #全てのサンプルにわたって以下を行う
+#   for (example_index, example) in enumerate(all_examples):
+#     #サンプルのインデックスのfeaturesをとってくる
+#     features = example_index_to_features[example_index]
 
-    #準備っぽい
-    prelim_predictions = []
-    # keep track of the minimum score of null start+end of position 0
-    score_null = 1000000  # large and positive
-    min_null_feature_index = 0  # the paragraph slice with min mull score
-    null_start_logit = 0  # the start logit at the slice with min null score
-    null_end_logit = 0  # the end logit at the slice with min null score
+#     #準備っぽい
+#     prelim_predictions = []
+#     # keep track of the minimum score of null start+end of position 0
+#     score_null = 1000000  # large and positive
+#     min_null_feature_index = 0  # the paragraph slice with min mull score
+#     null_start_logit = 0  # the start logit at the slice with min null score
+#     null_end_logit = 0  # the end logit at the slice with min null score
 
-    #全てのfeatureにわたり以下を行う
-    for (feature_index, feature) in enumerate(features):
-      result = unique_id_to_result[feature.unique_id]
-      start_indexes = _get_best_indexes(result.start_logits, n_best_size)
-      end_indexes = _get_best_indexes(result.end_logits, n_best_size)
-      # if we could have irrelevant answers, get the min score of irrelevant
-      if FLAGS.version_2_with_negative:
-        feature_null_score = result.start_logits[0] + result.end_logits[0]
-        if feature_null_score < score_null:
-          score_null = feature_null_score
-          min_null_feature_index = feature_index
-          null_start_logit = result.start_logits[0]
-          null_end_logit = result.end_logits[0]
-      for start_index in start_indexes:
-        for end_index in end_indexes:
-          # We could hypothetically create invalid predictions, e.g., predict
-          # that the start of the span is in the question. We throw out all
-          # invalid predictions.
-          if start_index >= len(feature.tokens):
-            continue
-          if end_index >= len(feature.tokens):
-            continue
-          if start_index not in feature.token_to_orig_map:
-            continue
-          if end_index not in feature.token_to_orig_map:
-            continue
-          if not feature.token_is_max_context.get(start_index, False):
-            continue
-          if end_index < start_index:
-            continue
-          length = end_index - start_index + 1
-          if length > max_answer_length:
-            continue
-          prelim_predictions.append(
-              _PrelimPrediction(
-                  feature_index=feature_index,
-                  start_index=start_index,
-                  end_index=end_index,
-                  start_logit=result.start_logits[start_index],
-                  end_logit=result.end_logits[end_index]))
+#     #全てのfeatureにわたり以下を行う
+#     for (feature_index, feature) in enumerate(features):
+#       result = unique_id_to_result[feature.unique_id]
+#       start_indexes = _get_best_indexes(result.start_logits, n_best_size)
+#       end_indexes = _get_best_indexes(result.end_logits, n_best_size)
+#       # if we could have irrelevant answers, get the min score of irrelevant
+#       if FLAGS.version_2_with_negative:
+#         feature_null_score = result.start_logits[0] + result.end_logits[0]
+#         if feature_null_score < score_null:
+#           score_null = feature_null_score
+#           min_null_feature_index = feature_index
+#           null_start_logit = result.start_logits[0]
+#           null_end_logit = result.end_logits[0]
+#       for start_index in start_indexes:
+#         for end_index in end_indexes:
+#           # We could hypothetically create invalid predictions, e.g., predict
+#           # that the start of the span is in the question. We throw out all
+#           # invalid predictions.
+#           if start_index >= len(feature.tokens):
+#             continue
+#           if end_index >= len(feature.tokens):
+#             continue
+#           if start_index not in feature.token_to_orig_map:
+#             continue
+#           if end_index not in feature.token_to_orig_map:
+#             continue
+#           if not feature.token_is_max_context.get(start_index, False):
+#             continue
+#           if end_index < start_index:
+#             continue
+#           length = end_index - start_index + 1
+#           if length > max_answer_length:
+#             continue
+#           prelim_predictions.append(
+#               _PrelimPrediction(
+#                   feature_index=feature_index,
+#                   start_index=start_index,
+#                   end_index=end_index,
+#                   start_logit=result.start_logits[start_index],
+#                   end_logit=result.end_logits[end_index]))
 
-    #もしsquad version1.1だったら以下を挿入
-    if FLAGS.version_2_with_negative:
-      prelim_predictions.append(
-          _PrelimPrediction(
-              feature_index=min_null_feature_index,
-              start_index=0,
-              end_index=0,
-              start_logit=null_start_logit,
-              end_logit=null_end_logit))
-    #ソート
-    prelim_predictions = sorted(
-        prelim_predictions,
-        key=lambda x: (x.start_logit + x.end_logit),
-        reverse=True)
+#     #もしsquad version1.1だったら以下を挿入
+#     if FLAGS.version_2_with_negative:
+#       prelim_predictions.append(
+#           _PrelimPrediction(
+#               feature_index=min_null_feature_index,
+#               start_index=0,
+#               end_index=0,
+#               start_logit=null_start_logit,
+#               end_logit=null_end_logit))
+#     #ソート
+#     prelim_predictions = sorted(
+#         prelim_predictions,
+#         key=lambda x: (x.start_logit + x.end_logit),
+#         reverse=True)
 
-    #
-    _NbestPrediction = collections.namedtuple(  # pylint: disable=invalid-name
-        "NbestPrediction", ["text", "start_logit", "end_logit"])
+#     #
+#     _NbestPrediction = collections.namedtuple(  # pylint: disable=invalid-name
+#         "NbestPrediction", ["text", "start_logit", "end_logit"])
 
-    seen_predictions = {}
-    nbest = []
-    #すべてのprelim_predictionsの数だけ以下を行う
-    for pred in prelim_predictions:
-      #best sizeを超えたらforを抜ける
-      if len(nbest) >= n_best_size:
-        break
+#     seen_predictions = {}
+#     nbest = []
+#     #すべてのprelim_predictionsの数だけ以下を行う
+#     for pred in prelim_predictions:
+#       #best sizeを超えたらforを抜ける
+#       if len(nbest) >= n_best_size:
+#         break
 
-      #featureを一つ抽出
-      feature = features[pred.feature_index]
-      #featureがnon-null予測だったら以下を行う
-      if pred.start_index > 0:  # this is a non-null prediction
-        tok_tokens = feature.tokens[pred.start_index:(pred.end_index + 1)]
-        orig_doc_start = feature.token_to_orig_map[pred.start_index]
-        orig_doc_end = feature.token_to_orig_map[pred.end_index]
-        orig_tokens = example.doc_tokens[orig_doc_start:(orig_doc_end + 1)]
-        tok_text = " ".join(tok_tokens)
+#       #featureを一つ抽出
+#       feature = features[pred.feature_index]
+#       #featureがnon-null予測だったら以下を行う
+#       if pred.start_index > 0:  # this is a non-null prediction
+#         tok_tokens = feature.tokens[pred.start_index:(pred.end_index + 1)]
+#         orig_doc_start = feature.token_to_orig_map[pred.start_index]
+#         orig_doc_end = feature.token_to_orig_map[pred.end_index]
+#         orig_tokens = example.doc_tokens[orig_doc_start:(orig_doc_end + 1)]
+#         tok_text = " ".join(tok_tokens)
 
-        # De-tokenize WordPieces that have been split off.
-        tok_text = tok_text.replace(" ##", "")
-        tok_text = tok_text.replace("##", "")
+#         # De-tokenize WordPieces that have been split off.
+#         tok_text = tok_text.replace(" ##", "")
+#         tok_text = tok_text.replace("##", "")
 
-        # Clean whitespace
-        tok_text = tok_text.strip()
-        tok_text = " ".join(tok_text.split())
-        orig_text = " ".join(orig_tokens)
+#         # Clean whitespace
+#         tok_text = tok_text.strip()
+#         tok_text = " ".join(tok_text.split())
+#         orig_text = " ".join(orig_tokens)
 
-        final_text = get_final_text(tok_text, orig_text, do_lower_case)
-        if final_text in seen_predictions:
-          continue
+#         final_text = get_final_text(tok_text, orig_text, do_lower_case)
+#         if final_text in seen_predictions:
+#           continue
 
-        seen_predictions[final_text] = True
-      else:
-        final_text = ""
-        seen_predictions[final_text] = True
+#         seen_predictions[final_text] = True
+#       else:
+#         final_text = ""
+#         seen_predictions[final_text] = True
 
-      nbest.append(
-          _NbestPrediction(
-              text=final_text,
-              start_logit=pred.start_logit,
-              end_logit=pred.end_logit))
+#       nbest.append(
+#           _NbestPrediction(
+#               text=final_text,
+#               start_logit=pred.start_logit,
+#               end_logit=pred.end_logit))
 
-    # if we didn't inlude the empty option in the n-best, inlcude it
-    if FLAGS.version_2_with_negative:
-      if "" not in seen_predictions:
-        nbest.append(
-            _NbestPrediction(
-                text="", start_logit=null_start_logit,
-                end_logit=null_end_logit))
-    # In very rare edge cases we could have no valid predictions. So we
-    # just create a nonce prediction in this case to avoid failure.
-    if not nbest:
-      nbest.append(
-          _NbestPrediction(text="empty", start_logit=0.0, end_logit=0.0))
+#     # if we didn't inlude the empty option in the n-best, inlcude it
+#     if FLAGS.version_2_with_negative:
+#       if "" not in seen_predictions:
+#         nbest.append(
+#             _NbestPrediction(
+#                 text="", start_logit=null_start_logit,
+#                 end_logit=null_end_logit))
+#     # In very rare edge cases we could have no valid predictions. So we
+#     # just create a nonce prediction in this case to avoid failure.
+#     if not nbest:
+#       nbest.append(
+#           _NbestPrediction(text="empty", start_logit=0.0, end_logit=0.0))
 
-    assert len(nbest) >= 1
+#     assert len(nbest) >= 1
 
-    total_scores = []
-    best_non_null_entry = None
-    for entry in nbest:
-      total_scores.append(entry.start_logit + entry.end_logit)
-      if not best_non_null_entry:
-        if entry.text:
-          best_non_null_entry = entry
+#     total_scores = []
+#     best_non_null_entry = None
+#     for entry in nbest:
+#       total_scores.append(entry.start_logit + entry.end_logit)
+#       if not best_non_null_entry:
+#         if entry.text:
+#           best_non_null_entry = entry
 
-    probs = _compute_softmax(total_scores)
+#     probs = _compute_softmax(total_scores)
 
-    nbest_json = []
-    for (i, entry) in enumerate(nbest):
-      output = collections.OrderedDict()
-      output["text"] = entry.text
-      output["probability"] = probs[i]
-      output["start_logit"] = entry.start_logit
-      output["end_logit"] = entry.end_logit
-      nbest_json.append(output)
+#     nbest_json = []
+#     for (i, entry) in enumerate(nbest):
+#       output = collections.OrderedDict()
+#       output["text"] = entry.text
+#       output["probability"] = probs[i]
+#       output["start_logit"] = entry.start_logit
+#       output["end_logit"] = entry.end_logit
+#       nbest_json.append(output)
 
-    assert len(nbest_json) >= 1
+#     assert len(nbest_json) >= 1
 
-    if not FLAGS.version_2_with_negative:
-      all_predictions[example.qas_id] = nbest_json[0]["text"]
-    else:
-      # predict "" iff the null score - the score of best non-null > threshold
-      score_diff = score_null - best_non_null_entry.start_logit - (
-          best_non_null_entry.end_logit)
-      scores_diff_json[example.qas_id] = score_diff
-      if score_diff > FLAGS.null_score_diff_threshold:
-        all_predictions[example.qas_id] = ""
-      else:
-        all_predictions[example.qas_id] = best_non_null_entry.text
+#     if not FLAGS.version_2_with_negative:
+#       all_predictions[example.qas_id] = nbest_json[0]["text"]
+#     else:
+#       # predict "" iff the null score - the score of best non-null > threshold
+#       score_diff = score_null - best_non_null_entry.start_logit - (
+#           best_non_null_entry.end_logit)
+#       scores_diff_json[example.qas_id] = score_diff
+#       if score_diff > FLAGS.null_score_diff_threshold:
+#         all_predictions[example.qas_id] = ""
+#       else:
+#         all_predictions[example.qas_id] = best_non_null_entry.text
 
-    all_nbest_json[example.qas_id] = nbest_json
+#     all_nbest_json[example.qas_id] = nbest_json
 
-  #jsonファイルとして書く
-  with tf.gfile.GFile(output_prediction_file, "w") as writer:
-    writer.write(json.dumps(all_predictions, indent=4) + "\n")
+#   #jsonファイルとして書く
+#   with tf.gfile.GFile(output_prediction_file, "w") as writer:
+#     writer.write(json.dumps(all_predictions, indent=4) + "\n")
 
-  with tf.gfile.GFile(output_nbest_file, "w") as writer:
-    writer.write(json.dumps(all_nbest_json, indent=4) + "\n")
+#   with tf.gfile.GFile(output_nbest_file, "w") as writer:
+#     writer.write(json.dumps(all_nbest_json, indent=4) + "\n")
 
-  if FLAGS.version_2_with_negative:
-    with tf.gfile.GFile(output_null_log_odds_file, "w") as writer:
-      writer.write(json.dumps(scores_diff_json, indent=4) + "\n")
+#   if FLAGS.version_2_with_negative:
+#     with tf.gfile.GFile(output_null_log_odds_file, "w") as writer:
+#       writer.write(json.dumps(scores_diff_json, indent=4) + "\n")
 
 
-#最終的なテキストを返す
-def get_final_text(pred_text, orig_text, do_lower_case):
-  """Project the tokenized prediction back to the original text."""
+# #最終的なテキストを返す
+# def get_final_text(pred_text, orig_text, do_lower_case):
+#   """Project the tokenized prediction back to the original text."""
 
-  # When we created the data, we kept track of the alignment between original
-  # (whitespace tokenized) tokens and our WordPiece tokenized tokens. So
-  # now `orig_text` contains the span of our original text corresponding to the
-  # span that we predicted.
-  #
-  # However, `orig_text` may contain extra characters that we don't want in
-  # our prediction.
-  #
-  # For example, let's say:
-  #   pred_text = steve smith
-  #   orig_text = Steve Smith's
-  #
-  # We don't want to return `orig_text` because it contains the extra "'s".
-  #
-  # We don't want to return `pred_text` because it's already been normalized
-  # (the SQuAD eval script also does punctuation stripping/lower casing but
-  # our tokenizer does additional normalization like stripping accent
-  # characters).
-  #
-  # What we really want to return is "Steve Smith".
-  #
-  # Therefore, we have to apply a semi-complicated alignment heruistic between
-  # `pred_text` and `orig_text` to get a character-to-charcter alignment. This
-  # can fail in certain cases in which case we just return `orig_text`.
+#   # When we created the data, we kept track of the alignment between original
+#   # (whitespace tokenized) tokens and our WordPiece tokenized tokens. So
+#   # now `orig_text` contains the span of our original text corresponding to the
+#   # span that we predicted.
+#   #
+#   # However, `orig_text` may contain extra characters that we don't want in
+#   # our prediction.
+#   #
+#   # For example, let's say:
+#   #   pred_text = steve smith
+#   #   orig_text = Steve Smith's
+#   #
+#   # We don't want to return `orig_text` because it contains the extra "'s".
+#   #
+#   # We don't want to return `pred_text` because it's already been normalized
+#   # (the SQuAD eval script also does punctuation stripping/lower casing but
+#   # our tokenizer does additional normalization like stripping accent
+#   # characters).
+#   #
+#   # What we really want to return is "Steve Smith".
+#   #
+#   # Therefore, we have to apply a semi-complicated alignment heruistic between
+#   # `pred_text` and `orig_text` to get a character-to-charcter alignment. This
+#   # can fail in certain cases in which case we just return `orig_text`.
 
-  def _strip_spaces(text):
-    ns_chars = []
-    ns_to_s_map = collections.OrderedDict()
-    for (i, c) in enumerate(text):
-      if c == " ":
-        continue
-      ns_to_s_map[len(ns_chars)] = i
-      ns_chars.append(c)
-    ns_text = "".join(ns_chars)
-    return (ns_text, ns_to_s_map)
+#   def _strip_spaces(text):
+#     ns_chars = []
+#     ns_to_s_map = collections.OrderedDict()
+#     for (i, c) in enumerate(text):
+#       if c == " ":
+#         continue
+#       ns_to_s_map[len(ns_chars)] = i
+#       ns_chars.append(c)
+#     ns_text = "".join(ns_chars)
+#     return (ns_text, ns_to_s_map)
 
-  # We first tokenize `orig_text`, strip whitespace from the result
-  # and `pred_text`, and check if they are the same length. If they are
-  # NOT the same length, the heuristic has failed. If they are the same
-  # length, we assume the characters are one-to-one aligned.
-  tokenizer = tokenization.BasicTokenizer(do_lower_case=do_lower_case)
+#   # We first tokenize `orig_text`, strip whitespace from the result
+#   # and `pred_text`, and check if they are the same length. If they are
+#   # NOT the same length, the heuristic has failed. If they are the same
+#   # length, we assume the characters are one-to-one aligned.
+#   tokenizer = tokenization.BasicTokenizer(do_lower_case=do_lower_case)
 
-  tok_text = " ".join(tokenizer.tokenize(orig_text))
+#   tok_text = " ".join(tokenizer.tokenize(orig_text))
 
-  start_position = tok_text.find(pred_text)
-  if start_position == -1:
-    if FLAGS.verbose_logging:
-      tf.logging.info(
-          "Unable to find text: '%s' in '%s'" % (pred_text, orig_text))
-    return orig_text
-  end_position = start_position + len(pred_text) - 1
+#   start_position = tok_text.find(pred_text)
+#   if start_position == -1:
+#     if FLAGS.verbose_logging:
+#       tf.logging.info(
+#           "Unable to find text: '%s' in '%s'" % (pred_text, orig_text))
+#     return orig_text
+#   end_position = start_position + len(pred_text) - 1
 
-  (orig_ns_text, orig_ns_to_s_map) = _strip_spaces(orig_text)
-  (tok_ns_text, tok_ns_to_s_map) = _strip_spaces(tok_text)
+#   (orig_ns_text, orig_ns_to_s_map) = _strip_spaces(orig_text)
+#   (tok_ns_text, tok_ns_to_s_map) = _strip_spaces(tok_text)
 
-  if len(orig_ns_text) != len(tok_ns_text):
-    if FLAGS.verbose_logging:
-      tf.logging.info("Length not equal after stripping spaces: '%s' vs '%s'",
-                      orig_ns_text, tok_ns_text)
-    return orig_text
+#   if len(orig_ns_text) != len(tok_ns_text):
+#     if FLAGS.verbose_logging:
+#       tf.logging.info("Length not equal after stripping spaces: '%s' vs '%s'",
+#                       orig_ns_text, tok_ns_text)
+#     return orig_text
 
-  # We then project the characters in `pred_text` back to `orig_text` using
-  # the character-to-character alignment.
-  tok_s_to_ns_map = {}
-  for (i, tok_index) in six.iteritems(tok_ns_to_s_map):
-    tok_s_to_ns_map[tok_index] = i
+#   # We then project the characters in `pred_text` back to `orig_text` using
+#   # the character-to-character alignment.
+#   tok_s_to_ns_map = {}
+#   for (i, tok_index) in six.iteritems(tok_ns_to_s_map):
+#     tok_s_to_ns_map[tok_index] = i
 
-  orig_start_position = None
-  if start_position in tok_s_to_ns_map:
-    ns_start_position = tok_s_to_ns_map[start_position]
-    if ns_start_position in orig_ns_to_s_map:
-      orig_start_position = orig_ns_to_s_map[ns_start_position]
+#   orig_start_position = None
+#   if start_position in tok_s_to_ns_map:
+#     ns_start_position = tok_s_to_ns_map[start_position]
+#     if ns_start_position in orig_ns_to_s_map:
+#       orig_start_position = orig_ns_to_s_map[ns_start_position]
 
-  if orig_start_position is None:
-    if FLAGS.verbose_logging:
-      tf.logging.info("Couldn't map start position")
-    return orig_text
+#   if orig_start_position is None:
+#     if FLAGS.verbose_logging:
+#       tf.logging.info("Couldn't map start position")
+#     return orig_text
 
-  orig_end_position = None
-  if end_position in tok_s_to_ns_map:
-    ns_end_position = tok_s_to_ns_map[end_position]
-    if ns_end_position in orig_ns_to_s_map:
-      orig_end_position = orig_ns_to_s_map[ns_end_position]
+#   orig_end_position = None
+#   if end_position in tok_s_to_ns_map:
+#     ns_end_position = tok_s_to_ns_map[end_position]
+#     if ns_end_position in orig_ns_to_s_map:
+#       orig_end_position = orig_ns_to_s_map[ns_end_position]
 
-  if orig_end_position is None:
-    if FLAGS.verbose_logging:
-      tf.logging.info("Couldn't map end position")
-    return orig_text
+#   if orig_end_position is None:
+#     if FLAGS.verbose_logging:
+#       tf.logging.info("Couldn't map end position")
+#     return orig_text
 
-  output_text = orig_text[orig_start_position:(orig_end_position + 1)]
-  return output_text
+#   output_text = orig_text[orig_start_position:(orig_end_position + 1)]
+#   return output_text
 
 
 def _get_best_indexes(logits, n_best_size):
@@ -1268,14 +1309,23 @@ def main(_):
     train_writer = FeatureWriter(
         filename=os.path.join(FLAGS.output_dir, "train.tf_record"),
         is_training=True)
+    
+    #vocabraryの単語のbertが出力するテンソル
+    vocab_tensors = make_dict_vocab_to_tensor(bert_config)
+    input_tensors = []
+    for i in range(len(train_examples)):
+      for j in range(len(train_examples[i]["kgr_tokens"])):
+        id = tokenizer.convert_tokens_to_ids(train_examples[i]["kgr_tokens"][j])
+        input_tensors.append(vocab_tensors[id])
+
     convert_examples_to_features(#この関数自身に返り値はないが、別の関数が実行され結果としてInputFeaturesクラスのインスタンスができる
         examples=train_examples,
         tokenizer=tokenizer,
-        max_seq_length=FLAGS.max_seq_length,
-        doc_stride=FLAGS.doc_stride,
-        max_query_length=FLAGS.max_query_length,
+        max_nlr_length=FLAGS.max_nlr_length,
+        max_kgr_length=FLAGS.max_kgr_length,
         is_training=True,
-        output_fn=train_writer.process_feature)#output_fnは関数だからprocess_featureにfeatureを与えなくていい
+        output_fn=train_writer.process_feature,
+        input_tensors=input_tensors)#output_fnは関数だからprocess_featureにfeatureを与えなくていい
         #convert_examples_to_featuresのなかでfeatureを与えて実行している模様
         #なので、下でcloseしている
     train_writer.close()
@@ -1309,23 +1359,29 @@ def main(_):
     def append_feature(feature):
       eval_features.append(feature)
       eval_writer.process_feature(feature)
+    
+    #vocabraryの単語のbertが出力するテンソル
+    vocab_tensors = make_dict_vocab_to_tensor(bert_config)
+    input_tensors = []
+    for i in range(len(train_examples)):
+      for j in range(len(train_examples[i]["kgr_tokens"])):
+        id = tokenizer.convert_tokens_to_ids(train_examples[i]["kgr_tokens"][j])
+        input_tensors.append(vocab_tensors[i])
 
     convert_examples_to_features(
         examples=eval_examples,
         tokenizer=tokenizer,
-        max_seq_length=FLAGS.max_seq_length,
-        doc_stride=FLAGS.doc_stride,
-        max_query_length=FLAGS.max_query_length,
+        max_nlr_length=FLAGS.max_nlr_length,
+        max_kgr_length=FLAGS.max_kgr_length,
         is_training=False,
-        output_fn=append_feature)
+        output_fn=append_feature,
+        input_tensors=input_tensors)
     eval_writer.close()
 
     tf.logging.info("***** Running predictions *****")
     tf.logging.info("  Num orig examples = %d", len(eval_examples))
     tf.logging.info("  Num split examples = %d", len(eval_features))
     tf.logging.info("  Batch size = %d", FLAGS.predict_batch_size)
-
-    all_results = []
 
     predict_input_fn = input_fn_builder(
         input_file=eval_writer.filename,
@@ -1335,32 +1391,22 @@ def main(_):
 
     # If running eval on the TPU, you will need to specify the number of
     # steps.
-    all_results = []
+    outputs = collections.OrderedDict()
     for result in estimator.predict(
         predict_input_fn, yield_single_examples=True):
-      if len(all_results) % 1000 == 0:
-        tf.logging.info("Processing example: %d" % (len(all_results)))
+      if len(outputs) % 1000 == 0:
+        tf.logging.info("Processing example: %d" % (len(outputs)))
       #書き込みたいものをforループで集める
-      tokens = tokenizer.convert_ids_to_tokens[result["ids"]]
-      # unique_id = int(result["unique_ids"])
-      # start_logits = [float(x) for x in result["start_logits"].flat]
-      # end_logits = [float(x) for x in result["end_logits"].flat]
-      # all_results.append(
-      #     RawResult(
-      #         unique_id=unique_id,
-      #         start_logits=start_logits,
-      #         end_logits=end_logits))
+      data=collections.OrderedDict()
+      data["estimated_tokens"] = tokenizer.convert_ids_to_tokens(result["ids"])
+      data["input_tokens"] = eval_examples[len(outputs)]["ngr_tokens"]
 
-    # output_prediction_file = os.path.join(FLAGS.output_dir, "predictions.json")
-    # output_nbest_file = os.path.join(FLAGS.output_dir, "nbest_predictions.json")
-    # output_null_log_odds_file = os.path.join(FLAGS.output_dir, "null_odds.json")
+      outputs[eval_examples[len(outputs)]["id"]] = data
 
-    # write_predictions(eval_examples, eval_features, all_results,
-    #                   FLAGS.n_best_size, FLAGS.max_answer_length,
-    #                   FLAGS.do_lower_case, output_prediction_file,
-    #                   output_nbest_file, output_null_log_odds_file)
-
-    #tokens,eval_examplesをナレッジグラフのjsonfileとして書き出す
+    #tokens,eval_examplesをナレッジグラフのjsonfileまたはttlとして書き出す
+    fw = open('predicted.json','w')
+    # json.dump関数でファイルに書き込む
+    json.dump(outputs,fw,indent=4)
 
     
 
