@@ -208,6 +208,10 @@ class InputFeatures(object):
 
 def read_kg_examples(input_file, is_training):
   """Read a KG json file into a list of KGExample."""
+  #自然言語表現(Natural Language Representation)と
+  #ナレッジグラフ表現(Knowledge Graph Representation)を持つ
+  #ngrは、学習用データにはあって予測用データはNone
+
   with tf.gfile.Open(input_file, "r") as reader:
     input_data = json.load(reader)["data"]#[Memo]ちょっとわからないけどデータを抽出してる
 
@@ -346,7 +350,10 @@ def convert_examples_to_features(examples,
       tf.logging.info(
           "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
     
-    #bertを呼び出して、エンコードする
+    #bertを呼び出して、トークンをエンコードする
+    #スペシャルトークンは全部０にする
+    ##理由１：スペシャルトークンは本家BERTのvocabにないから
+    ##理由２：あとで１つのスペシャルトークンに対するトークンたちのテンソルを足しあげるから
     #input_tensors
 
     #InputFeaturesクラスのインスタンスを定義する
@@ -540,13 +547,13 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
     input_ids = features["input_ids"]
     input_mask = features["input_mask"]
     segment_ids = features["segment_ids"]
-    input_tensor = features["input_tensor"]
+    input_tensor = features["input_tensor"]#いらない
 
     #trainかどうか
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
 
     #モデル作成
-    transformer_outputs = create_model(
+    (estimated_ids,estimated_tensor) = create_model(
         bert_config=bert_config,
         is_training=is_training,
         input_ids=input_ids,
@@ -672,7 +679,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
         return loss
 
       #loss
-      loss = compute_loss(transformer_outputs[0],input_ids,transformer_outputs[1],input_tensor)
+      loss = compute_loss(estimated_ids,input_ids,estimated_tensor,input_tensor)
 
       #オプティマイザー
       train_op = optimization.create_optimizer(
@@ -763,31 +770,40 @@ def write_predictions(all_examples, all_features, all_results, n_best_size,
   tf.logging.info("Writing predictions to: %s" % (output_prediction_file))
   tf.logging.info("Writing nbest to: %s" % (output_nbest_file))
 
-  example_index_to_features = collections.defaultdict(list)
+  #辞書か関数のようなものを作っている
+  example_index_to_features = collections.defaultdict(list)#これは何だろう。関数？辞書？
   for feature in all_features:
     example_index_to_features[feature.example_index].append(feature)
 
+  #結果のユニークな集合
   unique_id_to_result = {}
   for result in all_results:
     unique_id_to_result[result.unique_id] = result
 
+  #予測結果を集めるタプル？
   _PrelimPrediction = collections.namedtuple(  # pylint: disable=invalid-name
       "PrelimPrediction",
       ["feature_index", "start_index", "end_index", "start_logit", "end_logit"])
 
+  #何かわからない。何らかのモデリング結果ぽい
   all_predictions = collections.OrderedDict()
   all_nbest_json = collections.OrderedDict()
   scores_diff_json = collections.OrderedDict()
 
+  #全てのサンプルにわたって以下を行う
   for (example_index, example) in enumerate(all_examples):
+    #サンプルのインデックスのfeaturesをとってくる
     features = example_index_to_features[example_index]
 
+    #準備っぽい
     prelim_predictions = []
     # keep track of the minimum score of null start+end of position 0
     score_null = 1000000  # large and positive
     min_null_feature_index = 0  # the paragraph slice with min mull score
     null_start_logit = 0  # the start logit at the slice with min null score
     null_end_logit = 0  # the end logit at the slice with min null score
+
+    #全てのfeatureにわたり以下を行う
     for (feature_index, feature) in enumerate(features):
       result = unique_id_to_result[feature.unique_id]
       start_indexes = _get_best_indexes(result.start_logits, n_best_size)
@@ -828,6 +844,7 @@ def write_predictions(all_examples, all_features, all_results, n_best_size,
                   start_logit=result.start_logits[start_index],
                   end_logit=result.end_logits[end_index]))
 
+    #もしsquad version1.1だったら以下を挿入
     if FLAGS.version_2_with_negative:
       prelim_predictions.append(
           _PrelimPrediction(
@@ -836,20 +853,27 @@ def write_predictions(all_examples, all_features, all_results, n_best_size,
               end_index=0,
               start_logit=null_start_logit,
               end_logit=null_end_logit))
+    #ソート
     prelim_predictions = sorted(
         prelim_predictions,
         key=lambda x: (x.start_logit + x.end_logit),
         reverse=True)
 
+    #
     _NbestPrediction = collections.namedtuple(  # pylint: disable=invalid-name
         "NbestPrediction", ["text", "start_logit", "end_logit"])
 
     seen_predictions = {}
     nbest = []
+    #すべてのprelim_predictionsの数だけ以下を行う
     for pred in prelim_predictions:
+      #best sizeを超えたらforを抜ける
       if len(nbest) >= n_best_size:
         break
+
+      #featureを一つ抽出
       feature = features[pred.feature_index]
+      #featureがnon-null予測だったら以下を行う
       if pred.start_index > 0:  # this is a non-null prediction
         tok_tokens = feature.tokens[pred.start_index:(pred.end_index + 1)]
         orig_doc_start = feature.token_to_orig_map[pred.start_index]
@@ -931,6 +955,7 @@ def write_predictions(all_examples, all_features, all_results, n_best_size,
 
     all_nbest_json[example.qas_id] = nbest_json
 
+  #jsonファイルとして書く
   with tf.gfile.GFile(output_prediction_file, "w") as writer:
     writer.write(json.dumps(all_predictions, indent=4) + "\n")
 
@@ -1311,6 +1336,8 @@ def main(_):
     #                   FLAGS.n_best_size, FLAGS.max_answer_length,
     #                   FLAGS.do_lower_case, output_prediction_file,
     #                   output_nbest_file, output_null_log_odds_file)
+
+    #tokens,eval_examplesをナレッジグラフのjsonfileとして書き出す
 
     
 
