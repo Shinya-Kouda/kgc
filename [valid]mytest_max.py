@@ -7,6 +7,15 @@ m = tf.reduce_max(
     axis=1
 )
 
-with tf.Session() as sess:
-  test = sess.run(m)
-  print(test)
+# with tf.Session() as sess:
+#   test = sess.run(m)
+#   print(test)
+
+############################################################
+
+def f():
+  return m
+
+g = tf.function(f)
+
+g()
