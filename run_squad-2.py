@@ -66,23 +66,18 @@ flags.DEFINE_string(
     "Initial checkpoint (usually from a pre-trained BERT model).")
 
 flags.DEFINE_bool(
-    "do_lower_case", True,
+    "do_lower_case", False,
     "Whether to lower case the input text. Should be True for uncased "
     "models and False for cased models.")
 #[todo]数をいい感じに調整する
 flags.DEFINE_integer(
-    "max_seq_length", 384,
+    "max_seq_length", 50,
     "The maximum total input sequence length after WordPiece tokenization. "
     "Sequences longer than this will be truncated, and sequences shorter "
     "than this will be padded.")
-#文書を読み込むsliding windowのストライド
-flags.DEFINE_integer(
-    "doc_stride", 128,
-    "When splitting up a long document into chunks, how much stride to "
-    "take between chunks.")
 #max_seq_lengthとはちがう。クエリのほう
 flags.DEFINE_integer(
-    "max_query_length", 64,
+    "max_query_length", 46,
     "The maximum number of tokens for the question. Questions longer than "
     "this will be truncated to this length.")
 
@@ -90,7 +85,7 @@ flags.DEFINE_bool("do_train", False, "Whether to run training.")
 
 flags.DEFINE_bool("do_predict", False, "Whether to run eval on the dev set.")
 
-flags.DEFINE_integer("train_batch_size", 32, "Total batch size for training.")
+flags.DEFINE_integer("train_batch_size", 10, "Total batch size for training.")
 #[Memo]trainのバッチサイズと変える意味は？
 flags.DEFINE_integer("predict_batch_size", 8,
                      "Total batch size for predictions.")
@@ -388,9 +383,9 @@ def convert_examples_to_features(examples,
     
     #bertを呼び出して、トークンをエンコードする
     #予めvocabをすべてエンコードしておいて、それを読み込む形にする
-    #スペシャルトークンは全部０にする
-    ##理由１：スペシャルトークンは本家BERTのvocabにないから
-    ##理由２：あとで１つのスペシャルトークンに対するトークンたちのテンソルを足しあげるから
+    #オントロジートークンは全部０にする
+    ##理由１：オントロジートークンは本家BERTのvocabにないから
+    ##理由２：あとで１つのオントロジートークンに対するトークンたちのテンソルを足しあげるから
     #input_tensors
 
     #InputFeaturesクラスのインスタンスを定義する
@@ -633,17 +628,17 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
     output_spec = None
     if mode == tf.estimator.ModeKeys.TRAIN:
 
-      #スペシャルトークンかどうか判断する関数
-      #special_idの辞書オブジェクトを作って、そこに属すならtrue
-      def is_special_id(id):
+      #オントロジートークンかどうか判断する関数
+      #ontology_idの辞書オブジェクトを作って、そこに属すならtrue
+      def is_ontology_id(id):
         vocab = tokenization.load_vocab(FLAGS.vocab_file)
         inv_vocab = {v:k for k,v in vocab.items()}
-        special_tokens = []
+        ontology_tokens = []
         for token in vocab.keys():
           if len(token) >= 2:
-            if token[0] == '[' and token[-1] == ']':
-              special_tokens.append(token)
-        if tokenization.convert_ids_to_tokens(inv_vocab, [id])[0] in special_tokens:
+            if (token[0] == '$' and token[-1] == '$') or (token[0] == '%' and token[-1]) == '%':
+              ontology_tokens.append(token)
+        if tokenization.convert_ids_to_tokens(inv_vocab, [id])[0] in ontology_tokens:
           return True
         else:
           return False
@@ -651,41 +646,41 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
       def add_segment_ids(ids):
         kg_segment_ids = [0]
         for i in range(len(ids)):
-          if is_special_id(ids[i]):
+          if is_ontology_id(ids[i]):
             kg_segment_ids.append(kg_segment_ids[-1]+1)
           else:
             kg_segment_ids.append(kg_segment_ids[-1])
         return (ids, kg_segment_ids[1:])
 
-      #special ids loss
-      #predictのスペシャルトークンAがrealにもある場合、そのトークンによる損失は０、ない場合は１
-      #スペシャルトークンAが複数存在する場合、その個数が同じなら、それらのトークンによる損失は０、同じでないときはその個数
+      #ontology ids loss
+      #predictのオントロジートークンAがrealにもある場合、そのトークンによる損失は０、ない場合は１
+      #オントロジートークンAが複数存在する場合、その個数が同じなら、それらのトークンによる損失は０、同じでないときはその個数
       #これをすべてのトークンに渡り加算する
-      def special_ids_loss(predict_ids, real_ids):
-        p_specials = {p for p in predict_ids if is_special_id(p)}
-        r_specials = {r for r in real_ids if is_special_id(r)}
-        counter = len(p_specials ^ r_specials)
+      def ontology_ids_loss(predict_ids, real_ids):
+        p_ontologys = {p for p in predict_ids if is_ontology_id(p)}
+        r_ontologys = {r for r in real_ids if is_ontology_id(r)}
+        counter = len(p_ontologys ^ r_ontologys)
         return counter
       #other ids loss
-      #等しいスペシャルトークンの後ろのトークン同士の差をロスとする
+      #等しいオントロジートークンの後ろのトークン同士の差をロスとする
       #１つのトークンはベクトルで表されるので、ベクトルの間の角でロスを定義する
       #角が０の時ロスも０
       #角が９０度のときロスは１
       #角が１８０度の時ロスは２になるようにする
       #等しいトークンが複数あるときは、それらの間でロスが最も低い組み合わせを選ぶ
-      #等しいトークンがないときは、ロスには加算されない（special_ids_lossで加算済）
+      #等しいトークンがないときは、ロスには加算されない（ontology_ids_lossで加算済）
       #等しいトークンがありかつ数が異なるときは、ロスが小さいペアを優先的に結び、ロスが大きいペアは
-      #special_ids_lossで加算される
+      #ontology_ids_lossで加算される
       def other_ids_loss(predict_ids, real_ids, predict_tensor, real_tensor):
-        #スペシャルトークンごとにセグメントidを付与する
+        #オントロジートークンごとにセグメントidを付与する
         (predict_ids, predict_kg_ids) = add_segment_ids(predict_ids)
         (real_ids, real_kg_ids) = add_segment_ids(real_ids)
         #predict_idsのスペシャルid１つに着目しインデックスを取得
         loss = 0
-        #predictとrealのidの中から、同じスペシャルトークンを取得し、ペアを作り、ロスを算出する
-        #ペアができないものは、すでにスペシャルトークンのロス関数で計算されているので無視する
+        #predictとrealのidの中から、同じオントロジートークンを取得し、ペアを作り、ロスを算出する
+        #ペアができないものは、すでにオントロジートークンのロス関数で計算されているので無視する
         for i in range(len(predict_ids)):
-          if is_special_id(predict_ids[i]):
+          if is_ontology_id(predict_ids[i]):
             p_tpl1 = set()
             for l in range(len(predict_ids)):
               if predict_ids[l] == predict_ids[i]:
@@ -695,7 +690,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
             for k2 in p_tpl1:
               for l3 in range(len(predict_ids)):
                 if predict_kg_ids[l3] == k2:
-                  if not is_special_id(predict_ids[l3]):
+                  if not is_ontology_id(predict_ids[l3]):
                     normalized_list.append(predict_tensor[l3,:])
             normalized_tensor = tf.stack(normalized_list)
             p_tensors.append(tf.math.l2_normalize(tf.reduce_sum(normalized_tensor,axis=0)))
@@ -709,13 +704,13 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
             for k2 in r_tpl1:
               for l3 in range(len(real_ids)):
                 if real_kg_ids[l3] == k2:
-                  if not is_special_id(real_ids[l3]):
+                  if not is_ontology_id(real_ids[l3]):
                     normalized_list.append(real_tensor[l3,:])
             normalized_tensor = tf.stack(normalized_list)
             r_tensors.append(tf.math.l2_normalize(tf.reduce_sum(normalized_tensor,axis=0)))
             #ロスが最小になる組み合わせを貪欲法で探索
             #ペアができたものはロスに加算して
-            #ペアができなかったものはspecial_ids_lossで加算されているので除くだけ
+            #ペアができなかったものはontology_ids_lossで加算されているので除くだけ
             vec_tmp = []
             for i,pt in enumerate(p_tensors):
               for j,rt in enumerate(r_tensors):
@@ -736,7 +731,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
       #lossを計算する関数
       #かなり作りこみが必要。たぶん自分で考える必要がある
       def compute_loss(predict_ids, real_ids, predict_tensor, real_tensor):
-        loss = special_ids_loss(predict_ids, real_ids) + other_ids_loss(predict_ids, real_ids, predict_tensor, real_tensor)
+        loss = ontology_ids_loss(predict_ids, real_ids) + other_ids_loss(predict_ids, real_ids, predict_tensor, real_tensor)
         return loss
 
       #loss
@@ -1245,11 +1240,13 @@ def main(_):
   #トークナイザー
   tokenizer = tokenization.FullTokenizer(
       vocab_file=FLAGS.vocab_file, do_lower_case=FLAGS.do_lower_case)
+  
   #tpuあるなら設定
   tpu_cluster_resolver = None
   if FLAGS.use_tpu and FLAGS.tpu_name:
     tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
         FLAGS.tpu_name, zone=FLAGS.tpu_zone, project=FLAGS.gcp_project)
+  
   #これはtensorflowがversion2のときということかな
   is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
   #モデリングの設定
@@ -1267,7 +1264,7 @@ def main(_):
   train_examples = None
   num_train_steps = None
   num_warmup_steps = None
-
+  
   #学習するときの事前処理、シャッフルする
   if FLAGS.do_train:
     train_examples = read_kg_examples(
@@ -1282,7 +1279,7 @@ def main(_):
     #なので、レコード数が同じで、まだ使わないデータを除いてシャッフルしているんではないかと思う
     rng = random.Random(12345)
     rng.shuffle(train_examples)
-
+  """
   #モデル定義
   model_fn = model_fn_builder(
       bert_config=bert_config,
@@ -1407,7 +1404,7 @@ def main(_):
     fw = open('predicted.json','w')
     # json.dump関数でファイルに書き込む
     json.dump(outputs,fw,indent=4)
-
+  """
     
 
 
