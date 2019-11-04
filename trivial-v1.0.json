@@ -1,0 +1,49 @@
+{
+    "data": [
+        {
+            "id": 100000001,
+            "nlr": "Andrew is happy",
+            "kgr": "$Scene$ $Situation$ $Subject$ Andrew %hasPredicate% !equalTo! %what% happy"
+        },
+        {
+            "id": 100000002,
+            "nlr": "They are strong",
+            "kgr": "$Scene$ $Situation$ $Subject$ They %hasPredicate% !equalTo! %what% strong"
+        },
+        {
+            "id": 100000003,
+            "nlr": "It is it",
+            "kgr": "$Scene$ $Situation$ $Subject$ It %hasPredicate% !equalTo! %what% it"
+        },
+        {
+            "id": 100000004,
+            "nlr": "He plays tennis",
+            "kgr": "$Scene$ $Situation$ $Subject$ He %hasPredicate% plays %what% tennis"
+        },
+        {
+            "id": 100000005,
+            "nlr": "He bought a car",
+            "kgr": "$Scene$ $Situation$ $Subject$ He %hasPredicate% bought %what% a car"
+        },
+        {
+            "id": 100000006,
+            "nlr": "She helped me",
+            "kgr": "$Scene$ $Situation$ $Subject$ She %hasPredicate% helped %who% me"
+        },
+        {
+            "id": 100000007,
+            "nlr": "I ask him that",
+            "kgr": "$Scene$ $Situation$ $Subject$ I %hasPredicate% ask %who% him %what% that"
+        },
+        {
+            "id": 100000008,
+            "nlr": "This situation tells us the answer",
+            "kgr": "$Scene$ $Situation$ $Subject$ This situation %hasPredicate% tells %who% us %what% the answer"
+        },
+        {
+            "id": 100000009,
+            "nlr": "I call him Maccho",
+            "kgr": "$Scene$ $Situation$ $Subject$ I %hasPredicate% call %who% him [SEP] $Scene$ $Situation$ $Subject$ him %hasPredicate% !equalTo! %what% Maccho"
+        }
+    ]
+}

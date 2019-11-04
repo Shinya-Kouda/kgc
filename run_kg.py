@@ -35,121 +35,78 @@ import tensorflow as tf
 #[Memo]モデルのパラメータを定義するのに使う。
 #[Memo]説明付きなので、とても勉強になる！！！
 
-#[Memo]定義
-flags = tf.flags
-#[Memo]？？
-FLAGS = flags.FLAGS
-#[Memo](tf.flags.)DEFINE_(type)("(引数名)",(初期値),"(説明)")
+
 ## Required parameters
-flags.DEFINE_string(
-    "bert_config_file", None,
-    "The config json file corresponding to the pre-trained BERT model. "
-    "This specifies the model architecture.")
+flags_bert_config_file = '../01_raw/cased_L-12_H-768_A-12/bert_config.json'
 
-flags.DEFINE_string("vocab_file", None,
-                    "The vocabulary file that the BERT model was trained on.")
+flags_vocab_file = '../01_raw/cased_L-12_H-768_A-12/vocab.txt'
 
-flags.DEFINE_string(
-    "output_dir", None,
-    "The output directory where the model checkpoints will be written.")
+flags_output_dir = '../01_raw/cased_L-12_H-768_A-12/output'
 
 ## Other parameters
-flags.DEFINE_string("train_file", None,
-                    "KG json for training. E.g., train-v1.1.json")
+flags_train_file = 'trivial-v1.0.json'
 
-flags.DEFINE_string(
-    "predict_file", None,
-    "KG json for predictions. E.g., dev-v1.1.json or test-v1.1.json")
+flags_predict_file = 'dev-v1.1.json'
 
-flags.DEFINE_string(
-    "init_checkpoint", None,
-    "Initial checkpoint (usually from a pre-trained BERT model).")
+flags_init_checkpoint = '../01_raw/cased_L-12_H-768_A-12/bert_model.ckpt'
 
-flags.DEFINE_bool(
-    "do_lower_case", False,
-    "Whether to lower case the input text. Should be True for uncased "
-    "models and False for cased models.")
+flags_do_lower_case = False
+
 #[todo]数をいい感じに調整する
-flags.DEFINE_integer(
-    "max_seq_length", 50,
-    "The maximum total input sequence length after WordPiece tokenization. "
-    "Sequences longer than this will be truncated, and sequences shorter "
-    "than this will be padded.")
+flags_max_seq_length = 50
+
 #max_seq_lengthとはちがう。クエリのほう
-flags.DEFINE_integer(
-    "max_query_length", 46,
-    "The maximum number of tokens for the question. Questions longer than "
-    "this will be truncated to this length.")
+flags_max_query_length = 46
 
-flags.DEFINE_bool("do_train", False, "Whether to run training.")
+flags_max_nlr_length = 50
 
-flags.DEFINE_bool("do_predict", False, "Whether to run eval on the dev set.")
+flags_max_kgr_length = 46
 
-flags.DEFINE_integer("train_batch_size", 10, "Total batch size for training.")
+flags_do_train = True
+
+flags_do_predict = False
+
+flags_train_batch_size = 10
+
 #[Memo]trainのバッチサイズと変える意味は？
-flags.DEFINE_integer("predict_batch_size", 8,
-                     "Total batch size for predictions.")
+flags_predict_batch_size = 8
 
-flags.DEFINE_float("learning_rate", 5e-5, "The initial learning rate for Adam.")
+flags_learning_rate = 5e-5
 
-flags.DEFINE_float("num_train_epochs", 3.0,
-                   "Total number of training epochs to perform.")
+flags_num_train_epochs = 3.0
+
 #[Memo]warmupは、学習の初期に学習率を高めにする方法。ただ以下の設定でどのような挙動になるのかはわからない
-flags.DEFINE_float(
-    "warmup_proportion", 0.1,
-    "Proportion of training to perform linear learning rate warmup for. "
-    "E.g., 0.1 = 10% of training.")
+flags_warmup_proportion = 0.1
 
-flags.DEFINE_integer("save_checkpoints_steps", 1000,
-                     "How often to save the model checkpoint.")
+flags_save_checkpoints_steps = 1000
+
 #1ステップで呼ばれるestimatorの回数
-flags.DEFINE_integer("iterations_per_loop", 1000,
-                     "How many steps to make in each estimator call.")
+flags_iterations_per_loop = 1000
+
 #これはなんなのかわからない
-flags.DEFINE_integer(
-    "n_best_size", 20,
-    "The total number of n-best predictions to generate in the "
-    "nbest_predictions.json output file.")
+flags_n_best_size = 20
+
 #[Memo]answerの最大の長さ
-flags.DEFINE_integer(
-    "max_answer_length", 30,
-    "The maximum length of an answer that can be generated. This is needed "
-    "because the start and end predictions are not conditioned on one another.")
+flags_max_answer_length = 30
 
-flags.DEFINE_bool("use_tpu", False, "Whether to use TPU or GPU/CPU.")
+flags_use_tpu = False
 
-tf.flags.DEFINE_string(
-    "tpu_name", None,
-    "The Cloud TPU to use for training. This should be either the name "
-    "used when creating the Cloud TPU, or a grpc://ip.address.of.tpu:8470 "
-    "url.")
+flags_tpu_name = None
 
-tf.flags.DEFINE_string(
-    "tpu_zone", None,
-    "[Optional] GCE zone where the Cloud TPU is located in. If not "
-    "specified, we will attempt to automatically detect the GCE project from "
-    "metadata.")
+flags_tpu_zone = None
 
-tf.flags.DEFINE_string(
-    "gcp_project", None,
-    "[Optional] Project name for the Cloud TPU-enabled project. If not "
-    "specified, we will attempt to automatically detect the GCE project from "
-    "metadata.")
+flags_gcp_project = None
 
-tf.flags.DEFINE_string("master", None, "[Optional] TensorFlow master URL.")
+flags_master = None
 
-flags.DEFINE_integer(
-    "num_tpu_cores", 8,
-    "Only used if `use_tpu` is True. Total number of TPU cores to use.")
+flags_num_tpu_cores = 8
 
-flags.DEFINE_bool(
-    "verbose_logging", False,
-    "If true, all of the warnings related to data processing will be printed. "
-    "A number of warnings are expected for a normal SQuAD evaluation.")
+flags_verbose_logging = False
 
-flags.DEFINE_float(
-    "null_score_diff_threshold", 0.0,
-    "If null_score - best_non_null is greater than the threshold predict null.")
+flags_null_score_diff_threshold = 0.0
+
+
+
 
 
 class KGExample(object):#objectクラスを継承
@@ -207,7 +164,7 @@ def read_kg_examples(input_file, is_training):
   #ナレッジグラフ表現(Knowledge Graph Representation)を持つ
   #ngrは、学習用データにはあって予測用データはNone
 
-  with tf.gfile.Open(input_file, "r") as reader:
+  with open(input_file, 'r') as reader:
     input_data = json.load(reader)["data"]#[Memo]ちょっとわからないけどデータを抽出してる
 
   def is_whitespace(c):
@@ -237,9 +194,9 @@ def read_kg_examples(input_file, is_training):
     #学習時はkgrの方も同様の処理
     if is_training:
       #もしkgrにあたるものがなかったらエラー
-      if (len(data["kgr"]) != 1):
-        raise ValueError(
-            "knowledge graph representation is =0 or <=2.")
+      # if (len(data["kgr"]) != 1):
+      #   raise ValueError(
+      #       "knowledge graph representation is =0 or <=2.")
       id=data["id"]
       kgr_text = data["kgr"]
       kgr_tokens = []
@@ -276,7 +233,7 @@ def make_dict_vocab_to_tensor(bert_config):
 
   #BERTモデル構築
   #vocabファイルを読み込み、語彙リストをつくる
-  vocab = tokenization.load_vocab(FLAGS.vocab_file)
+  vocab = tokenization.load_vocab(flags_vocab_file)
   #input_idsを作る（０スタートで語彙の数のぶんだけ）
   input_ids = list(range(len(vocab)))
   #input_maskを作る（全部０だと思う）
@@ -631,7 +588,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
       #オントロジートークンかどうか判断する関数
       #ontology_idの辞書オブジェクトを作って、そこに属すならtrue
       def is_ontology_id(id):
-        vocab = tokenization.load_vocab(FLAGS.vocab_file)
+        vocab = tokenization.load_vocab(flags_vocab_file)
         inv_vocab = {v:k for k,v in vocab.items()}
         ontology_tokens = []
         for token in vocab.keys():
@@ -868,7 +825,7 @@ RawResult = collections.namedtuple("RawResult",
 #       start_indexes = _get_best_indexes(result.start_logits, n_best_size)
 #       end_indexes = _get_best_indexes(result.end_logits, n_best_size)
 #       # if we could have irrelevant answers, get the min score of irrelevant
-#       if FLAGS.version_2_with_negative:
+#       if flags_version_2_with_negative:
 #         feature_null_score = result.start_logits[0] + result.end_logits[0]
 #         if feature_null_score < score_null:
 #           score_null = feature_null_score
@@ -904,7 +861,7 @@ RawResult = collections.namedtuple("RawResult",
 #                   end_logit=result.end_logits[end_index]))
 
 #     #もしsquad version1.1だったら以下を挿入
-#     if FLAGS.version_2_with_negative:
+#     if flags_version_2_with_negative:
 #       prelim_predictions.append(
 #           _PrelimPrediction(
 #               feature_index=min_null_feature_index,
@@ -965,7 +922,7 @@ RawResult = collections.namedtuple("RawResult",
 #               end_logit=pred.end_logit))
 
 #     # if we didn't inlude the empty option in the n-best, inlcude it
-#     if FLAGS.version_2_with_negative:
+#     if flags_version_2_with_negative:
 #       if "" not in seen_predictions:
 #         nbest.append(
 #             _NbestPrediction(
@@ -1000,14 +957,14 @@ RawResult = collections.namedtuple("RawResult",
 
 #     assert len(nbest_json) >= 1
 
-#     if not FLAGS.version_2_with_negative:
+#     if not flags_version_2_with_negative:
 #       all_predictions[example.qas_id] = nbest_json[0]["text"]
 #     else:
 #       # predict "" iff the null score - the score of best non-null > threshold
 #       score_diff = score_null - best_non_null_entry.start_logit - (
 #           best_non_null_entry.end_logit)
 #       scores_diff_json[example.qas_id] = score_diff
-#       if score_diff > FLAGS.null_score_diff_threshold:
+#       if score_diff > flags_null_score_diff_threshold:
 #         all_predictions[example.qas_id] = ""
 #       else:
 #         all_predictions[example.qas_id] = best_non_null_entry.text
@@ -1021,7 +978,7 @@ RawResult = collections.namedtuple("RawResult",
 #   with tf.gfile.GFile(output_nbest_file, "w") as writer:
 #     writer.write(json.dumps(all_nbest_json, indent=4) + "\n")
 
-#   if FLAGS.version_2_with_negative:
+#   if flags_version_2_with_negative:
 #     with tf.gfile.GFile(output_null_log_odds_file, "w") as writer:
 #       writer.write(json.dumps(scores_diff_json, indent=4) + "\n")
 
@@ -1076,7 +1033,7 @@ RawResult = collections.namedtuple("RawResult",
 
 #   start_position = tok_text.find(pred_text)
 #   if start_position == -1:
-#     if FLAGS.verbose_logging:
+#     if flags_verbose_logging:
 #       tf.logging.info(
 #           "Unable to find text: '%s' in '%s'" % (pred_text, orig_text))
 #     return orig_text
@@ -1086,7 +1043,7 @@ RawResult = collections.namedtuple("RawResult",
 #   (tok_ns_text, tok_ns_to_s_map) = _strip_spaces(tok_text)
 
 #   if len(orig_ns_text) != len(tok_ns_text):
-#     if FLAGS.verbose_logging:
+#     if flags_verbose_logging:
 #       tf.logging.info("Length not equal after stripping spaces: '%s' vs '%s'",
 #                       orig_ns_text, tok_ns_text)
 #     return orig_text
@@ -1104,7 +1061,7 @@ RawResult = collections.namedtuple("RawResult",
 #       orig_start_position = orig_ns_to_s_map[ns_start_position]
 
 #   if orig_start_position is None:
-#     if FLAGS.verbose_logging:
+#     if flags_verbose_logging:
 #       tf.logging.info("Couldn't map start position")
 #     return orig_text
 
@@ -1115,7 +1072,7 @@ RawResult = collections.namedtuple("RawResult",
 #       orig_end_position = orig_ns_to_s_map[ns_end_position]
 
 #   if orig_end_position is None:
-#     if FLAGS.verbose_logging:
+#     if flags_verbose_logging:
 #       tf.logging.info("Couldn't map end position")
 #     return orig_text
 
@@ -1201,64 +1158,70 @@ class FeatureWriter(object):
 
 def validate_flags_or_throw(bert_config):
   """Validate the input FLAGS or throw an exception."""
-  tokenization.validate_case_matches_checkpoint(FLAGS.do_lower_case,
-                                                FLAGS.init_checkpoint)
+  tokenization.validate_case_matches_checkpoint(flags_do_lower_case,
+                                                flags_init_checkpoint)
 
-  if not FLAGS.do_train and not FLAGS.do_predict:
+  if not flags_do_train and not flags_do_predict:
     raise ValueError("At least one of `do_train` or `do_predict` must be True.")
 
-  if FLAGS.do_train:
-    if not FLAGS.train_file:
+  if flags_do_train:
+    if not flags_train_file:
       raise ValueError(
           "If `do_train` is True, then `train_file` must be specified.")
-  if FLAGS.do_predict:
-    if not FLAGS.predict_file:
+  if flags_do_predict:
+    if not flags_predict_file:
       raise ValueError(
           "If `do_predict` is True, then `predict_file` must be specified.")
 
-  if FLAGS.max_seq_length > bert_config.max_position_embeddings:
+  if flags_max_seq_length > bert_config.max_position_embeddings:
     raise ValueError(
         "Cannot use sequence length %d because the BERT model "
         "was only trained up to sequence length %d" %
-        (FLAGS.max_seq_length, bert_config.max_position_embeddings))
+        (flags_max_seq_length, bert_config.max_position_embeddings))
 
-  if FLAGS.max_seq_length <= FLAGS.max_query_length + 3:
+  if flags_max_seq_length <= flags_max_query_length + 3:
     raise ValueError(
         "The max_seq_length (%d) must be greater than max_query_length "
-        "(%d) + 3" % (FLAGS.max_seq_length, FLAGS.max_query_length))
+        "(%d) + 3" % (flags_max_seq_length, flags_max_query_length))
 
 
 def main(_):
+  print('start')
   #ログ
-  tf.logging.set_verbosity(tf.logging.INFO)
+  # tf.logging.set_verbosity(tf.logging.INFO)
   #bertの設定
-  bert_config = modeling.BertConfig.from_json_file(FLAGS.bert_config_file)
+  bert_config = modeling.BertConfig.from_json_file(flags_bert_config_file)
   #フラグの評価
   validate_flags_or_throw(bert_config)
   #ディレクトリ作成
-  tf.gfile.MakeDirs(FLAGS.output_dir)
+  #tf.io.gfile.MakeDirs(flags_output_dir)
   #トークナイザー
   tokenizer = tokenization.FullTokenizer(
-      vocab_file=FLAGS.vocab_file, do_lower_case=FLAGS.do_lower_case)
+      vocab_file=flags_vocab_file, do_lower_case=flags_do_lower_case)
   
   #tpuあるなら設定
   tpu_cluster_resolver = None
-  if FLAGS.use_tpu and FLAGS.tpu_name:
+  if flags_use_tpu and flags_tpu_name:
     tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
-        FLAGS.tpu_name, zone=FLAGS.tpu_zone, project=FLAGS.gcp_project)
+        flags_tpu_name, zone=flags_tpu_zone, project=flags_gcp_project)
   
   #これはtensorflowがversion2のときということかな
-  is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
+  #is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
+  is_per_host = True
   #モデリングの設定
   #モデルオブジェクトの出力先などもここで設定する
-  run_config = tf.contrib.tpu.RunConfig(
+  run_config = tf.estimator.RunConfig(
+      model_dir=flags_output_dir,
+      save_checkpoints_steps=flags_save_checkpoints_steps
+      )
+  run_config = tf.tpu_config.RunConfig(
       cluster=tpu_cluster_resolver,
-      master=FLAGS.master,
-      model_dir=FLAGS.output_dir,
-      save_checkpoints_steps=FLAGS.save_checkpoints_steps,
+      master=flags_master,
+      model_dir=flags_output_dir,
+      save_checkpoints_steps=flags_save_checkpoints_steps,
       tpu_config=tf.contrib.tpu.TPUConfig(
-          iterations_per_loop=FLAGS.iterations_per_loop,
-          num_shards=FLAGS.num_tpu_cores,
+          iterations_per_loop=flags_iterations_per_loop,
+          num_shards=flags_num_tpu_cores,
           per_host_input_for_training=is_per_host))
 
   train_examples = None
@@ -1266,12 +1229,12 @@ def main(_):
   num_warmup_steps = None
   
   #学習するときの事前処理、シャッフルする
-  if FLAGS.do_train:
+  if flags_do_train:
     train_examples = read_kg_examples(
-        input_file=FLAGS.train_file, is_training=True)
+        input_file=flags_train_file, is_training=True)
     num_train_steps = int(
-        len(train_examples) / FLAGS.train_batch_size * FLAGS.num_train_epochs)
-    num_warmup_steps = int(num_train_steps * FLAGS.warmup_proportion)
+        len(train_examples) / flags_train_batch_size * flags_num_train_epochs)
+    num_warmup_steps = int(num_train_steps * flags_warmup_proportion)
 
     # Pre-shuffle the input to avoid having to make a very large shuffle
     # buffer in in the `input_fn`.
@@ -1279,32 +1242,32 @@ def main(_):
     #なので、レコード数が同じで、まだ使わないデータを除いてシャッフルしているんではないかと思う
     rng = random.Random(12345)
     rng.shuffle(train_examples)
-  """
+
   #モデル定義
   model_fn = model_fn_builder(
       bert_config=bert_config,
-      init_checkpoint=FLAGS.init_checkpoint,
-      learning_rate=FLAGS.learning_rate,
+      init_checkpoint=flags_init_checkpoint,
+      learning_rate=flags_learning_rate,
       num_train_steps=num_train_steps,
       num_warmup_steps=num_warmup_steps,
-      use_tpu=FLAGS.use_tpu,
-      use_one_hot_embeddings=FLAGS.use_tpu)
+      use_tpu=flags_use_tpu,
+      use_one_hot_embeddings=flags_use_tpu)
 
   # If TPU is not available, this will fall back to normal Estimator on CPU
   # or GPU.
-  estimator = tf.contrib.tpu.TPUEstimator(
-      use_tpu=FLAGS.use_tpu,
+  estimator = tf.compat.v1.estimator.tpu.TPUEstimator(
+      use_tpu=flags_use_tpu,
       model_fn=model_fn,
       config=run_config,
-      train_batch_size=FLAGS.train_batch_size,
-      predict_batch_size=FLAGS.predict_batch_size)
+      train_batch_size=flags_train_batch_size,
+      predict_batch_size=flags_predict_batch_size)
 
   #学習するときのメインの処理
-  if FLAGS.do_train:
+  if flags_do_train:
     # We write to a temporary file to avoid storing very large constant tensors
     # in memory.
     train_writer = FeatureWriter(
-        filename=os.path.join(FLAGS.output_dir, "train.tf_record"),
+        filename=os.path.join(flags_output_dir, "train.tf_record"),
         is_training=True)
     
     #vocabraryの単語のbertが出力するテンソル
@@ -1318,8 +1281,8 @@ def main(_):
     convert_examples_to_features(#この関数自身に返り値はないが、別の関数が実行され結果としてInputFeaturesクラスのインスタンスができる
         examples=train_examples,
         tokenizer=tokenizer,
-        max_nlr_length=FLAGS.max_nlr_length,
-        max_kgr_length=FLAGS.max_kgr_length,
+        max_nlr_length=flags_max_nlr_length,
+        max_kgr_length=flags_max_kgr_length,
         is_training=True,
         output_fn=train_writer.process_feature,
         input_tensors=input_tensors)#output_fnは関数だからprocess_featureにfeatureを与えなくていい
@@ -1327,16 +1290,16 @@ def main(_):
         #なので、下でcloseしている
     train_writer.close()
 
-    tf.logging.info("***** Running training *****")
-    tf.logging.info("  Num orig examples = %d", len(train_examples))
-    tf.logging.info("  Num split examples = %d", train_writer.num_features)
-    tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
-    tf.logging.info("  Num steps = %d", num_train_steps)
+    # tf.logging.info("***** Running training *****")
+    # tf.logging.info("  Num orig examples = %d", len(train_examples))
+    # tf.logging.info("  Num split examples = %d", train_writer.num_features)
+    # tf.logging.info("  Batch size = %d", flags_train_batch_size)
+    # tf.logging.info("  Num steps = %d", num_train_steps)
     del train_examples
 
     train_input_fn = input_fn_builder(
         input_file=train_writer.filename,
-        seq_length=FLAGS.max_seq_length,
+        seq_length=flags_max_seq_length,
         is_training=True,
         drop_remainder=True)
     estimator.train(input_fn=train_input_fn, max_steps=num_train_steps)#ここで学習している
@@ -1344,12 +1307,12 @@ def main(_):
     #が参考になる。ここを見る限り、model_fnでモデル構造を決めているようである
 
   #予測するとき
-  if FLAGS.do_predict:
+  if flags_do_predict:
     eval_examples = read_kg_examples(
-        input_file=FLAGS.predict_file, is_training=False)
+        input_file=flags_predict_file, is_training=False)
 
     eval_writer = FeatureWriter(
-        filename=os.path.join(FLAGS.output_dir, "eval.tf_record"),
+        filename=os.path.join(flags_output_dir, "eval.tf_record"),
         is_training=False)
     eval_features = []
 
@@ -1368,21 +1331,21 @@ def main(_):
     convert_examples_to_features(
         examples=eval_examples,
         tokenizer=tokenizer,
-        max_nlr_length=FLAGS.max_nlr_length,
-        max_kgr_length=FLAGS.max_kgr_length,
+        max_nlr_length=flags_max_nlr_length,
+        max_kgr_length=flags_max_kgr_length,
         is_training=False,
         output_fn=append_feature,
         input_tensors=input_tensors)
     eval_writer.close()
 
-    tf.logging.info("***** Running predictions *****")
-    tf.logging.info("  Num orig examples = %d", len(eval_examples))
-    tf.logging.info("  Num split examples = %d", len(eval_features))
-    tf.logging.info("  Batch size = %d", FLAGS.predict_batch_size)
+    # tf.logging.info("***** Running predictions *****")
+    # tf.logging.info("  Num orig examples = %d", len(eval_examples))
+    # tf.logging.info("  Num split examples = %d", len(eval_features))
+    # tf.logging.info("  Batch size = %d", flags_predict_batch_size)
 
     predict_input_fn = input_fn_builder(
         input_file=eval_writer.filename,
-        seq_length=FLAGS.max_seq_length,
+        seq_length=flags_max_seq_length,
         is_training=False,
         drop_remainder=False)
 
@@ -1404,12 +1367,12 @@ def main(_):
     fw = open('predicted.json','w')
     # json.dump関数でファイルに書き込む
     json.dump(outputs,fw,indent=4)
-  """
+
     
 
 
 if __name__ == "__main__":
-  flags.mark_flag_as_required("vocab_file")
-  flags.mark_flag_as_required("bert_config_file")
-  flags.mark_flag_as_required("output_dir")
-  tf.app.run()
+  # flags_mark_flag_as_required("vocab_file")
+  # flags_mark_flag_as_required("bert_config_file")
+  # flags_mark_flag_as_required("output_dir")
+  main(0)

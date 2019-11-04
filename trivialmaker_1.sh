@@ -1,3 +1,4 @@
+rm -r trivial-v1.0.json
 echo { >> trivial-v1.0.json
 echo "    \"data\": [" >> trivial-v1.0.json
 counter=0
@@ -30,9 +31,20 @@ do
     echo "        {" >> trivial-v1.0.json
     echo "            \"id\": ${id}," >> trivial-v1.0.json
     echo "            \"nlr\": \"$subject $predicate $who $what\"," >> trivial-v1.0.json
-    echo "            \"kgr\": \"\$Scene\$ \$Situation\$ \$Subject\$ $subject %hasPredicate% $predicate $who $what\"" >> trivial-v1.0.json
+    echo "            \"kgr\": \"\$Scene\$ \$Situation\$ \$Subject\$ $subject %hasPredicate% $predicate %who% $who %what% $what\"" >> trivial-v1.0.json
     echo "        }," >> trivial-v1.0.json
 done < 4_structure.list
+
+while read subject predicate wh object complement
+do
+    counter=`expr $counter + 1`
+    id=$(printf "%09d\n" "${counter}")
+    echo "        {" >> trivial-v1.0.json
+    echo "            \"id\": ${id}," >> trivial-v1.0.json
+    echo "            \"nlr\": \"$subject $predicate $wh $object $complement\"," >> trivial-v1.0.json
+    echo "            \"kgr\": \"\$Scene\$ \$Situation\$ \$Subject\$ $subject %hasPredicate% $predicate %$wh% $object [SEP] \$Scene\$ \$Situation\$ \$Subject\$ $object %hasPredicate% !equalTo! %what% $complement\"" >> trivial-v1.0.json
+    echo "        }," >> trivial-v1.0.json
+done < 5_structure.list
 
 sed -i -e "$ s/.$//" trivial-v1.0.json
 sed -i -e "s/_/ /g" trivial-v1.0.json
